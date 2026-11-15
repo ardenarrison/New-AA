@@ -1,0 +1,30 @@
+# Build output
+bin/
+obj/
+Package/
+
+# Python
+__pycache__/
+*.pyc
+
+# Specific to one PC (written by setup.py)
+newaa.local.json
+
+# NVIDIA's DLSS SDK. Its license does not allow redistributing it, so each person downloads it from
+# https://github.com/NVIDIA/DLSS and puts it in DLSS_SDK/ (see BUILD.md). The DLSS runtime DLLs belong to it too.
+DLSS_SDK/
+nvngx_*.dll
+
+# The native plugin links NVIDIA's library. build.py compiles it (python build.py --native), and a built copy
+# is best published as a release download rather than stored in the repository.
+Native/NewAANgx.dll
+Native/*.obj
+Native/*.lib
+Native/*.exp
+
+# Editors and IDEs
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo

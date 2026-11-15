@@ -1,0 +1,214 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    FXAA mod for Kitten Space Agency.
+    Build:   dotnet build -c Release
+    Override paths on the command line if your install differs, e.g.:
+      dotnet build -c Release -p:KsaInstallDir="D:\Games\KSA\" -p:KsaModDir="C:\Users\me\Documents\My Games\Kitten Space Agency\mods\newaa\"
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>14.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>newaa</AssemblyName>
+    <RootNamespace>KSA.Mods.NewAA</RootNamespace>
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- Folder containing KSA.dll and its DLLs. Must end with a backslash. -->
+    <KsaInstallDir Condition="'$(KsaInstallDir)' == ''">C:\Program Files\Kitten Space Agency\</KsaInstallDir>
+    <!-- Where the game loads mods from. Copied here after every build. -->
+    <KsaModDir Condition="'$(KsaModDir)' == ''">$([System.Environment]::GetFolderPath(SpecialFolder.Personal))\My Games\Kitten Space Agency\mods\newaa\</KsaModDir>
+    <!-- Set to false to skip copying into the mods folder. -->
+    <DeployMod Condition="'$(DeployMod)' == ''">true</DeployMod>
+  </PropertyGroup>
+
+  <!-- The game itself. Private=false so these are never copied into the mod folder. -->
+  <ItemGroup>
+    <Reference Include="KSA">
+      <HintPath>$(KsaInstallDir)KSA.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Brutal.Logging">
+      <HintPath>$(KsaInstallDir)Brutal.Logging.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Planet.Render.Core">
+      <HintPath>$(KsaInstallDir)Planet.Render.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Brutal.Vulkan">
+      <HintPath>$(KsaInstallDir)Brutal.Vulkan.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Brutal.Vulkan.Abstractions">
+      <HintPath>$(KsaInstallDir)Brutal.Vulkan.Abstractions.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Brutal.Memory">
+      <HintPath>$(KsaInstallDir)Brutal.Memory.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Brutal.ShaderC">
+      <HintPath>$(KsaInstallDir)Brutal.ShaderC.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Brutal.ImGui">
+      <HintPath>$(KsaInstallDir)Brutal.ImGui.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Brutal.Numerics">
+      <HintPath>$(KsaInstallDir)Brutal.Numerics.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Brutal.Localization">
+      <HintPath>$(KsaInstallDir)Brutal.Localization.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Planet.Core">
+      <HintPath>$(KsaInstallDir)Planet.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Brutal.Glfw">
+      <HintPath>$(KsaInstallDir)Brutal.Glfw.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Tomlet">
+      <HintPath>$(KsaInstallDir)Tomlet.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Brutal.ImGui.Abstractions">
+      <HintPath>$(KsaInstallDir)Brutal.ImGui.Abstractions.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="CommunityToolkit.HighPerformance">
+      <HintPath>$(KsaInstallDir)CommunityToolkit.HighPerformance.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Brutal.Concurrency">
+      <HintPath>$(KsaInstallDir)Brutal.Concurrency.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Brutal.Collections">
+      <HintPath>$(KsaInstallDir)Brutal.Collections.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="BepuPhysics">
+      <HintPath>$(KsaInstallDir)BepuPhysics.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="BepuUtilities">
+      <HintPath>$(KsaInstallDir)BepuUtilities.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Brutal.Core">
+      <HintPath>$(KsaInstallDir)Brutal.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="MathNet.Numerics">
+      <HintPath>$(KsaInstallDir)MathNet.Numerics.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Microsoft.Extensions.Logging.Console">
+      <HintPath>$(KsaInstallDir)Microsoft.Extensions.Logging.Console.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Microsoft.Extensions.Logging.Abstractions">
+      <HintPath>$(KsaInstallDir)Microsoft.Extensions.Logging.Abstractions.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Brutal.Gltf">
+      <HintPath>$(KsaInstallDir)Brutal.Gltf.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Brutal.Fmod">
+      <HintPath>$(KsaInstallDir)Brutal.Fmod.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Brutal.Ktx">
+      <HintPath>$(KsaInstallDir)Brutal.Ktx.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Brutal.Texture.Abstractions">
+      <HintPath>$(KsaInstallDir)Brutal.Texture.Abstractions.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Brutal.ImPlot">
+      <HintPath>$(KsaInstallDir)Brutal.ImPlot.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Brutal.Vulkan.Vma">
+      <HintPath>$(KsaInstallDir)Brutal.Vulkan.Vma.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Brutal.Texture">
+      <HintPath>$(KsaInstallDir)Brutal.Texture.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Brutal.Monitor.Host">
+      <HintPath>$(KsaInstallDir)Brutal.Monitor.Host.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Brutal.Monitor.Common">
+      <HintPath>$(KsaInstallDir)Brutal.Monitor.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Brutal.Render.Mesh">
+      <HintPath>$(KsaInstallDir)Brutal.Render.Mesh.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="MemoryPack.Core">
+      <HintPath>$(KsaInstallDir)MemoryPack.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Brutal.RakNet">
+      <HintPath>$(KsaInstallDir)Brutal.RakNet.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Brutal.Maths">
+      <HintPath>$(KsaInstallDir)Brutal.Maths.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Brutal.Strings">
+      <HintPath>$(KsaInstallDir)Brutal.Strings.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Microsoft.Extensions.Logging">
+      <HintPath>$(KsaInstallDir)Microsoft.Extensions.Logging.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Brutal.Stb">
+      <HintPath>$(KsaInstallDir)Brutal.Stb.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!--
+    Harmony for patching. The game does not ship it. If StarMap provides its own
+    copy, delete this PackageReference and reference StarMap's DLL instead.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Lib.Harmony" Version="2.3.3" />
+    <PackageReference Include="StarMap.API" Version="0.3.6" />
+  </ItemGroup>
+
+  <!-- Copy the built mod (DLL, mod.toml, Content/) into the game's mods folder. -->
+  <Target Name="DeployMod" AfterTargets="Build" Condition="'$(DeployMod)' == 'true'">
+    <MakeDir Directories="$(KsaModDir)" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(KsaModDir)" />
+    <Copy SourceFiles="mod.toml" DestinationFolder="$(KsaModDir)" />
+    <Copy SourceFiles="Native\NewAANgx.dll" DestinationFolder="$(KsaModDir)" Condition="Exists('Native\NewAANgx.dll')" />
+    <!-- The DLSS runtime NGX loads from the mod folder. 55 MB, so it is only copied when it changed. -->
+    <Copy SourceFiles="DLSS_SDK\lib\Windows_x86_64\rel\nvngx_dlss.dll" DestinationFolder="$(KsaModDir)" SkipUnchangedFiles="true" Condition="Exists('DLSS_SDK\lib\Windows_x86_64\rel\nvngx_dlss.dll')" />
+    <ItemGroup>
+      <ModContent Include="Content\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ModContent)" DestinationFiles="@(ModContent->'$(KsaModDir)%(RecursiveDir)%(Filename)%(Extension)')" />
+    <Message Importance="high" Text="Mod deployed to $(KsaModDir)" />
+  </Target>
+
+</Project>

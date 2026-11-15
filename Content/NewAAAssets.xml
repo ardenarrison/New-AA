@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Assets>
+  <Shader Id="FxaaFrag" Path="Shaders/FxaaFrag.frag" />
+
+  <Shader Id="SmaaEdgeVert" Path="Shaders/SmaaEdgeVert.vert" />
+  <Shader Id="SmaaEdgeFrag" Path="Shaders/SmaaEdgeFrag.frag" />
+  <Shader Id="SmaaWeightsVert" Path="Shaders/SmaaWeightsVert.vert" />
+  <Shader Id="SmaaWeightsFrag" Path="Shaders/SmaaWeightsFrag.frag" />
+  <Shader Id="SmaaBlendVert" Path="Shaders/SmaaBlendVert.vert" />
+  <Shader Id="SmaaBlendFrag" Path="Shaders/SmaaBlendFrag.frag" />
+
+  <Shader Id="TaaVert" Path="Shaders/TaaVert.vert" />
+  <Shader Id="TaaResolveFrag" Path="Shaders/TaaResolveFrag.frag" />
+  <Shader Id="TaaCopyFrag" Path="Shaders/TaaCopyFrag.frag" />
+
+  <Shader Id="DlaaMotionFrag" Path="Shaders/DlaaMotionFrag.frag" />
+  <Shader Id="DlaaBodyMotionFrag" Path="Shaders/DlaaBodyMotionFrag.frag" />
+  <Shader Id="DlaaCopyFrag" Path="Shaders/DlaaCopyFrag.frag" />
+  <Shader Id="DlaaLineVert" Path="Shaders/DlaaLineVert.vert" />
+  <Shader Id="DlaaLineFrag" Path="Shaders/DlaaLineFrag.frag" />
+  <Shader Id="DlaaLineCombineFrag" Path="Shaders/DlaaLineCombineFrag.frag" />
+
+  <Texture Id="SmaaAreaTex" Path="Textures/AreaTex.ktx2" />
+  <Texture Id="SmaaSearchTex" Path="Textures/SearchTex.ktx2" />
+</Assets>
