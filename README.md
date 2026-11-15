@@ -19,6 +19,10 @@ Download `newaa-1.0.0-windows.zip` from the Releases page. It contains the built
 
 DLAA needs an NVIDIA RTX GPU (RTX 20-series or newer) and a current driver. SMAA and FXAA work on any GPU.
 
+### Powered by NVIDIA DLSS
+DLAA in New AA uses **NVIDIA DLSS** (via the NVIDIA NGX SDK). NVIDIA, DLSS and RTX are trademarks of NVIDIA Corporation. New AA is a free community mod and is not affiliated with or endorsed by NVIDIA or by the game's developers.
+The release zip includes `nvngx_dlss.dll` and NVIDIA's NGX code in `NewAANgx.dll`, with NVIDIA's license text (`NVIDIA_DLSS_SDK_LICENSE.txt`). By using those files you agree to NVIDIA's license. In short: do not reverse engineer them or remove their notices, do not redistribute them as a stand-alone product, and DLSS is for systems with NVIDIA GPUs only.
+
 ## Build from source
 
     python setup.py     check the machine and save the game paths (once)

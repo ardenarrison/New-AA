@@ -54,6 +54,10 @@ SOFTWARE.
   must meet the distribution requirements in that license.
 - NVIDIA did not issue New AA an application ID, so it starts NGX with its own project ID (a GUID in `Source/DlaaRenderer.cs`) and
   the CUSTOM engine type, which is what the SDK headers prescribe for that case.
+- Release builds of New AA ship `nvngx_dlss.dll` and `NewAANgx.dll` (which contains NVIDIA NGX code) together with NVIDIA's license text.
+  Using those files is subject to NVIDIA's license: among other things, you may not reverse engineer or decompile them, remove their
+  notices, or redistribute them as a stand-alone product, and DLSS is licensed only for use on systems with NVIDIA GPUs. NVIDIA may
+  also update the DLSS runtime over the air.
 - NVIDIA, DLSS, RTX and GeForce are trademarks of NVIDIA Corporation. New AA is not affiliated with or endorsed by NVIDIA.
 
 ## Harmony
@@ -70,7 +74,6 @@ SOFTWARE.
 ## Kitten Space Agency
 
 - The game's DLLs are referenced at build time from your own install and are never copied into this project or the mod.
-- `Content/Shaders/DlaaLineVert.vert` reproduces the colour conversion (RGB to HSL, darkening by alpha) from the game's own
-  `Line.vert` shader, so that orbit lines drawn by the DLAA overlay look the same as the game's. That code belongs to the
-  game's developers (RocketWerkz).
+- `Content/Shaders/DlaaLineVert.vert` colours orbit lines the same way the game does (saturation and lightness scaled by alpha),
+  using its own code written for New AA, not code copied from the game.
 - New AA is a community mod and is not affiliated with or endorsed by the game's developers.

@@ -3,7 +3,7 @@
 // Orbit lines for DLAA, drawn after DLSS so they never go through temporal accumulation.
 // Each instance is one segment of a line strip: it reads point i and point i+1 (the same vertex buffer bound twice, one element apart)
 // and expands them into a screen-space quad, so the edges can be antialiased in the fragment shader.
-// Positions are in ego space, like the game's own Line.vert. The view-projection here is the unjittered one.
+// Positions are in ego space, like the game's own orbit lines. The view-projection here is the unjittered one.
 layout(location = 0) in vec3 inP0;
 layout(location = 1) in vec3 inP1;
 layout(location = 2) in uvec4 inC0;
@@ -21,62 +21,50 @@ layout(push_constant) uniform LinePush
 const float colourDivision = 1.0 / 255.0;
 const float Epsilon = 1e-10;
 
-// Same colour treatment as the game's Line.vert.
-vec3 RGBtoHCV(in vec3 RGB)
+// Orbit line colouring. Like the game's orbit lines, the colour's saturation and lightness are scaled by its alpha (never below 0.1),
+// which darkens faint lines instead of letting them wash out.
+vec3 rgbToHsl(vec3 c)
 {
-    vec4 P = (RGB.g < RGB.b) ? vec4(RGB.bg, -1.0, 2.0/3.0) : vec4(RGB.gb, 0.0, -1.0/3.0);
-    vec4 Q = (RGB.r < P.x) ? vec4(P.xyw, RGB.r) : vec4(RGB.r, P.yzx);
-    float C = Q.x - min(Q.w, Q.y);
-    float H = abs((Q.w - Q.y) / (6 * C + Epsilon) + Q.z);
-    return vec3(H, C, Q.x);
-}
-
-vec3 RGBtoHSL(in vec3 RGB)
-{
-    vec3 HCV = RGBtoHCV(RGB);
-    float L = HCV.z - HCV.y * 0.5;
-    float S = HCV.y / (1 - abs(L * 2 - 1) + Epsilon);
-    return vec3(HCV.x, S, L);
-}
-
-float HUE2RGB(float p, float q, float t)
-{
-    if (t < 0) t += 1;
-    if (t > 1) t -= 1;
-    if (t < 1./6) return p + (q - p) * 6 * t;
-    if (t < 1./2) return q;
-    if (t < 2./3) return p + (q - p) * (2./3 - t) * 6;
-    return p;
-}
-
-vec3 HSLtoRGB(float h, float s, float l)
-{
-    vec3 result;
-    if (s == 0)
+    float hi = max(c.r, max(c.g, c.b));
+    float lo = min(c.r, min(c.g, c.b));
+    float chroma = hi - lo;
+    float l = 0.5 * (hi + lo);
+    float s = chroma / (1.0 - abs(2.0 * l - 1.0) + Epsilon);
+    float h = 0.0;
+    if (chroma > 0.0)
     {
-        float a = l * 255;
-        result = vec3(a, a, a);
+        if (hi == c.r)
+        {
+            h = mod((c.g - c.b) / chroma, 6.0);
+        }
+        else if (hi == c.g)
+        {
+            h = (c.b - c.r) / chroma + 2.0;
+        }
+        else
+        {
+            h = (c.r - c.g) / chroma + 4.0;
+        }
+        h /= 6.0;
     }
-    else
-    {
-        float q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-        float p = 2 * l - q;
-        result.r = HUE2RGB(p, q, h + 1.0 / 3.0) * 255;
-        result.g = HUE2RGB(p, q, h) * 255;
-        result.b = HUE2RGB(p, q, h - 1.0 / 3.0) * 255;
-    }
-    return result;
+    return vec3(h, s, l);
+}
+
+vec3 hslToRgb(float h, float s, float l)
+{
+    float chroma = (1.0 - abs(2.0 * l - 1.0)) * s;
+    vec3 k = clamp(abs(mod(h * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
+    return (l - 0.5 * chroma) + chroma * k;
 }
 
 vec4 lineColor(uvec4 c)
 {
     vec3 rgb = vec3(c.rgb) * colourDivision;
     float alpha = float(c.a) * colourDivision;
-    vec3 hsl = RGBtoHSL(rgb);
-    float saturation = clamp(hsl.y * alpha, 0.1, 1);
-    float lightness = clamp(hsl.z * alpha, 0.1, 1);
-    rgb = HSLtoRGB(hsl.x, saturation, lightness) * colourDivision;
-    return vec4(rgb, alpha);
+    vec3 hsl = rgbToHsl(rgb);
+    float saturation = clamp(hsl.y * alpha, 0.1, 1.0);
+    float lightness = clamp(hsl.z * alpha, 0.1, 1.0);
+    return vec4(hslToRgb(hsl.x, saturation, lightness), alpha);
 }
 
 void main()
