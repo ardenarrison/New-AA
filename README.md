@@ -3,7 +3,24 @@
 Adds FXAA, SMAA 1x (High preset) and DLAA to Settings > Display > Anti-Aliasing. TAA is kept in the code but is switched off (`TaaAntiAliasing.Enabled = false`).
 Each runs after the game's tonemap composite, in place of its CMAA2 pass when selected.
 
-## Quick start
+## Install (Windows)
+
+Download `newaa-1.0.0-windows.zip` from the Releases page. It contains the built mod, so nothing needs to be compiled. New AA supports Windows only for now.
+
+1. Close the game and StarMap.
+2. Extract the `newaa` folder from the zip into `Documents\My Games\Kitten Space Agency\mods\`, so that `mods\newaa\mod.toml` exists.
+3. Open `Documents\My Games\Kitten Space Agency\manifest.toml` and make sure it contains:
+
+       [[mods]]
+       id = "newaa"
+       enabled = true
+
+4. Start the game through `StarMap.exe`, then pick **DLAA**, **SMAA** or **FXAA** under Settings > Display > Anti-Aliasing.
+
+DLAA needs an NVIDIA RTX GPU (RTX 20-series or newer) and a current driver. SMAA and FXAA work on any GPU.
+
+## Build from source
+
     python setup.py     check the machine and save the game paths (once)
     python build.py     build the mod into Package\
     python deploy.py    install it into the game and enable it
