@@ -193,7 +193,7 @@ def main() -> int:
     if args.dry_run:
         ok("Dry run finished.")
     else:
-        ok("Deployed. Start the game through StarMap.exe, then pick DLAA, SMAA or FXAA under Settings > Display > Anti-Aliasing.")
+        ok("Deployed. Start the game through StarMap.exe, then pick DLAA, FSR Native AA, SMAA or FXAA under Settings > Display > Anti-Aliasing.")
     return 0
 
 

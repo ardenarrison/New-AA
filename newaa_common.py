@@ -31,6 +31,16 @@ SDK_INCLUDE = SDK_DIR / "include"
 SDK_LIB = SDK_DIR / "lib" / "Windows_x86_64" / "x64" / "nvsdk_ngx_d.lib"
 DLSS_RUNTIME = SDK_DIR / "lib" / "Windows_x86_64" / "rel" / "nvngx_dlss.dll"
 BUILT_DLL = ROOT / "bin" / "Release" / "net10.0" / "newaa.dll"
+# AMD's FSR runtime for FSR Native AA: the two signed Vulkan DLLs from the FSR SDK. They are MIT licensed and may be shipped, but at
+# 36 MB they are downloaded from AMD's repository at a fixed release (not stored in this one) and checked against these hashes.
+FSR_DIR = ROOT / "FSR_SDK"
+FSR_RELEASE = "v2.4.0"
+FSR_URL = f"https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/{FSR_RELEASE}/Kits/FidelityFX/signedbin/"
+FSR_RUNTIME = {
+    "amd_fidelityfx_loader_vk.dll": "38a56a01fb3565c0757d9f5c1e4e69de4b65e5f2e5769b323b200dc1f142bab9",
+    "amd_fidelityfx_upscaler_vk.dll": "4a7e895af6e0b615d40a84d59eb8c2b1054ad91cdd0c739567940270d51bdab7",
+}
+FSR_LICENSE = ROOT / "ThirdParty" / "AMD_FSR_SDK_LICENSE.txt"
 
 # The game processes that keep the mod's DLLs loaded. Deploying while one is running fails on locked files.
 GAME_PROCESSES = ("ksa.exe", "starmap.exe")
@@ -342,6 +352,47 @@ def same_file(a: Path, b: Path) -> bool:
     if a.stat().st_size != b.stat().st_size:
         return False
     return sha256(a) == sha256(b)
+
+
+def fsr_runtime_problems() -> List[str]:
+    """The FSR runtime DLLs in FSR_SDK/ that are missing or do not match the pinned hashes."""
+    problems: List[str] = []
+    for name, digest in FSR_RUNTIME.items():
+        path = FSR_DIR / name
+        if not path.is_file():
+            problems.append(f"{name} is missing")
+        elif sha256(path) != digest:
+            problems.append(f"{name} does not match the {FSR_RELEASE} release (SHA-256 differs)")
+    return problems
+
+
+def download_fsr_runtime() -> List[str]:
+    """Download the FSR runtime DLLs from AMD's repository into FSR_SDK/. Each file is checked against its pinned hash before it
+    replaces anything. Returns the problems (empty when both files are in place)."""
+    import urllib.request
+    FSR_DIR.mkdir(exist_ok=True)
+    problems: List[str] = []
+    for name, digest in FSR_RUNTIME.items():
+        target = FSR_DIR / name
+        if target.is_file() and sha256(target) == digest:
+            continue
+        partial = target.with_name(name + ".download")
+        try:
+            note(f"Downloading {name} ({FSR_RELEASE}) ...")
+            request = urllib.request.Request(FSR_URL + name, headers={"User-Agent": "newaa-build"})
+            with urllib.request.urlopen(request, timeout=120) as response, partial.open("wb") as handle:
+                shutil.copyfileobj(response, handle)
+        except OSError as error:
+            partial.unlink(missing_ok=True)
+            problems.append(f"{name}: download failed ({error})")
+            continue
+        if sha256(partial) != digest:
+            partial.unlink(missing_ok=True)
+            problems.append(f"{name}: the download does not match the expected SHA-256, so it was discarded")
+            continue
+        partial.replace(target)
+        ok(f"{target.relative_to(ROOT)} ({human(target.stat().st_size)}, SHA-256 checked)")
+    return problems
 
 
 def files_under(folder: Path) -> List[Path]:

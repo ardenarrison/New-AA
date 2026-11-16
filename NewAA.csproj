@@ -204,6 +204,11 @@
     <Copy SourceFiles="Native\NewAANgx.dll" DestinationFolder="$(KsaModDir)" Condition="Exists('Native\NewAANgx.dll')" />
     <!-- The DLSS runtime NGX loads from the mod folder. 55 MB, so it is only copied when it changed. -->
     <Copy SourceFiles="DLSS_SDK\lib\Windows_x86_64\rel\nvngx_dlss.dll" DestinationFolder="$(KsaModDir)" SkipUnchangedFiles="true" Condition="Exists('DLSS_SDK\lib\Windows_x86_64\rel\nvngx_dlss.dll')" />
+    <!-- AMD's FSR runtime for FSR Native AA (setup.py or build.py downloads it into FSR_SDK\), with its license. -->
+    <ItemGroup>
+      <FsrRuntime Include="FSR_SDK\amd_fidelityfx_loader_vk.dll;FSR_SDK\amd_fidelityfx_upscaler_vk.dll;ThirdParty\AMD_FSR_SDK_LICENSE.txt" Condition="Exists('FSR_SDK\amd_fidelityfx_upscaler_vk.dll')" />
+    </ItemGroup>
+    <Copy SourceFiles="@(FsrRuntime)" DestinationFolder="$(KsaModDir)" SkipUnchangedFiles="true" />
     <ItemGroup>
       <ModContent Include="Content\**\*.*" />
     </ItemGroup>

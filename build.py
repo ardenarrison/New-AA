@@ -3,9 +3,11 @@
     python build.py             build the C# mod and assemble Package\\
     python build.py --native    also rebuild Native\\NewAANgx.dll (needs Visual Studio C++ tools and the Vulkan SDK)
     python build.py --clean     delete bin\\ and obj\\ first
+    python build.py --no-download   do not download AMD's FSR runtime when FSR_SDK\\ lacks it
 
-Package\\ is a complete, drop-in mod folder: newaa.dll, mod.toml, NewAAAssets.xml, Shaders\\, Textures\\, NewAANgx.dll and the
-DLSS runtime nvngx_dlss.dll. python deploy.py installs it into the game. This script never touches the game folders.
+Package\\ is a complete, drop-in mod folder: newaa.dll, mod.toml, NewAAAssets.xml, Shaders\\, Textures\\, NewAANgx.dll, the
+DLSS runtime nvngx_dlss.dll, and AMD's FSR runtime (amd_fidelityfx_loader_vk.dll, amd_fidelityfx_upscaler_vk.dll) with its
+license. python deploy.py installs it into the game. This script never touches the game folders.
 
 Run python setup.py first on a new machine.
 """
@@ -81,6 +83,20 @@ def build_native() -> None:
     ok(f"Built {common.NATIVE_DLL.relative_to(common.ROOT)} ({common.human(common.NATIVE_DLL.stat().st_size)})")
 
 
+def ensure_fsr_runtime(download: bool) -> None:
+    """AMD's FSR runtime in FSR_SDK\\, downloaded from AMD's repository at the pinned release when it is missing."""
+    heading(f"AMD FSR runtime ({common.FSR_RELEASE})")
+    problems = common.fsr_runtime_problems()
+    if problems and download:
+        problems = common.download_fsr_runtime()
+    if problems:
+        for problem in problems:
+            warn(problem)
+        warn("FSR Native AA will not work in this build. Run  python build.py  again with an internet connection.")
+        return
+    ok(f"{', '.join(common.FSR_RUNTIME)} in {common.FSR_DIR.relative_to(common.ROOT)}\\ (SHA-256 checked)")
+
+
 def build_mod(ksa_dir: Path) -> None:
     heading("C# mod (newaa.dll)")
     command = [
@@ -123,6 +139,12 @@ def assemble_package() -> None:
         shutil.copy2(common.DLSS_RUNTIME, package / common.DLSS_RUNTIME.name)
     else:
         warn("DLSS_SDK/.../nvngx_dlss.dll is missing, so DLAA will not start. Copy it from the DLSS SDK into the mod folder.")
+    if not common.fsr_runtime_problems():
+        for name in common.FSR_RUNTIME:
+            shutil.copy2(common.FSR_DIR / name, package / name)
+        shutil.copy2(common.FSR_LICENSE, package / common.FSR_LICENSE.name)
+    else:
+        warn("AMD's FSR runtime is missing from FSR_SDK/, so FSR Native AA will not start.")
 
     problems = common.check_package(package)
     if problems:
@@ -145,6 +167,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Build the New AA mod and assemble the Package folder.")
     parser.add_argument("--native", action="store_true", help="rebuild Native/NewAANgx.dll too (needs MSVC and the Vulkan SDK)")
     parser.add_argument("--clean", action="store_true", help="delete bin/ and obj/ before building")
+    parser.add_argument("--no-download", action="store_true", help="do not download AMD's FSR runtime when FSR_SDK/ lacks it")
     parser.add_argument("--ksa-dir", help="the game install folder (default: the one setup.py saved, or the usual locations)")
     args = parser.parse_args()
 
@@ -170,6 +193,7 @@ def main() -> int:
         if not args.native:
             note("Native/NewAANgx.dll is missing. Building it.")
         build_native()
+    ensure_fsr_runtime(not args.no_download)
     build_mod(ksa_dir)
     assemble_package()
 

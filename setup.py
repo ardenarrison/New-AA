@@ -5,7 +5,8 @@
     python setup.py --yes                never ask, use what was found (for scripts)
 
 Checks the .NET SDK, the game install (and that every game DLL the project references is there), StarMap, NVIDIA's
-DLSS SDK, the native plugin and its optional toolchain, and the GPU. Restores the NuGet packages and saves the paths it
+DLSS SDK, the native plugin and its optional toolchain, AMD's FSR runtime (and offers to download it), and the GPU. Restores the
+NuGet packages and saves the paths it
 found to newaa.local.json, which build.py and deploy.py read. Safe to run again.
 
 Then:  python build.py   and   python deploy.py
@@ -138,6 +139,24 @@ def check_dlss_sdk() -> bool:
     return complete
 
 
+def check_fsr_runtime(assume_yes: bool) -> None:
+    """AMD's FSR runtime (two signed DLLs, MIT licensed), downloaded from AMD's repository at the pinned release."""
+    heading(f"AMD FSR runtime ({common.FSR_RELEASE})")
+    problems = common.fsr_runtime_problems()
+    if problems:
+        for problem in problems:
+            warn(problem)
+        if common.ask_yes_no(f"Download them (about 36 MB) from {common.FSR_URL} ?", True, assume_yes):
+            problems = common.download_fsr_runtime()
+    if problems:
+        for problem in problems:
+            warn(problem)
+        warn("Without these files FSR Native AA will not start. build.py tries the download again.")
+        return
+    for name in common.FSR_RUNTIME:
+        ok(f"{(common.FSR_DIR / name).relative_to(common.ROOT)}  (SHA-256 matches {common.FSR_RELEASE})")
+
+
 def check_native(sdk_complete: bool) -> None:
     heading("Native plugin (NewAANgx.dll)")
     if common.NATIVE_DLL.is_file():
@@ -164,7 +183,8 @@ def check_gpu() -> None:
     heading("GPU (to run DLAA, not to build)")
     import shutil
     if not shutil.which("nvidia-smi"):
-        warn("nvidia-smi not found. DLAA needs an NVIDIA RTX GPU (RTX 20-series or newer) and its driver.")
+        warn("nvidia-smi not found. DLAA needs an NVIDIA RTX GPU (RTX 20-series or newer) and its driver."
+             " FSR Native AA, SMAA and FXAA work on other GPUs too.")
         return
     try:
         result = common.run(["nvidia-smi", "--query-gpu=name,compute_cap,driver_version", "--format=csv,noheader"], capture=True)
@@ -227,6 +247,7 @@ def main() -> int:
     check_starmap()
     sdk_complete = check_dlss_sdk()
     check_native(sdk_complete)
+    check_fsr_runtime(args.yes)
     check_gpu()
 
     mod_dir = common.resolve_mod_dir(args.mod_dir, config)
