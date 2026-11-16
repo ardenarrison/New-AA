@@ -60,6 +60,17 @@ SOFTWARE.
   also update the DLSS runtime over the air.
 - NVIDIA, DLSS, RTX and GeForce are trademarks of NVIDIA Corporation. New AA is not affiliated with or endorsed by NVIDIA.
 
+## AMD FSR SDK (FidelityFX SDK) 2.4.0
+
+- Used by: `Source/FsrNative.cs`, which calls the FSR API in `amd_fidelityfx_loader_vk.dll`. Its struct layouts and constants follow the
+  SDK's `ffx_api.h`, `ffx_api_types.h`, `vk/ffx_api_vk.h` and `ffx_upscale.h`. No SDK source is copied into this repository.
+- Shipped in the mod: AMD's signed `amd_fidelityfx_loader_vk.dll` and `amd_fidelityfx_upscaler_vk.dll`, unmodified, from
+  `Kits/FidelityFX/signedbin/` at tag `v2.4.0` of https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK. `setup.py` / `build.py`
+  download them into `FSR_SDK/` (not stored in the repository because of their size) and check them against pinned SHA-256 hashes.
+- License: the SDK's `docs/license.md` lists these DLLs and headers under the MIT license, Copyright (C) Advanced Micro Devices, Inc. The
+  full text is in `ThirdParty/AMD_FSR_SDK_LICENSE.txt`, which the build copies next to the DLLs.
+- AMD, FidelityFX, FSR and Radeon are trademarks of Advanced Micro Devices, Inc. New AA is not affiliated with or endorsed by AMD.
+
 ## Harmony
 
 - Used as: a compile-time reference (NuGet `Lib.Harmony` 2.3.3). At runtime StarMap supplies its own copy, and the mod does not

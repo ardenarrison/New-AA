@@ -128,14 +128,14 @@ internal static class FxaaState
 	}
 }
 
-// Adds FXAA, SMAA and DLAA to the list of options the Anti-Aliasing dropdown shows.
+// Adds FXAA, SMAA, DLAA and FSR Native AA to the list of options the Anti-Aliasing dropdown shows.
 [HarmonyPatch(typeof(GameSettings), nameof(GameSettings.GetAvailableAntiAliasingMethods))]
 internal static class AvailableAntiAliasingMethodsPatch
 {
 	private static void Postfix(ref ReadOnlySpan<GameSettings.AntiAliasing> __result)
 	{
 		List<GameSettings.AntiAliasing> methods = new List<GameSettings.AntiAliasing>(__result.ToArray());
-		foreach (GameSettings.AntiAliasing extra in new[] { FxaaAntiAliasing.Method, SmaaAntiAliasing.Method, DlaaAntiAliasing.Method })
+		foreach (GameSettings.AntiAliasing extra in new[] { FxaaAntiAliasing.Method, SmaaAntiAliasing.Method, DlaaAntiAliasing.Method, FsrAntiAliasing.Method })
 		{
 			if (!methods.Contains(extra))
 			{
@@ -160,7 +160,8 @@ internal static class AntiAliasingNames
 		{
 			(FxaaAntiAliasing.Method, FxaaAntiAliasing.Label),
 			(SmaaAntiAliasing.Method, SmaaAntiAliasing.Label),
-			(DlaaAntiAliasing.Method, DlaaAntiAliasing.Label)
+			(DlaaAntiAliasing.Method, DlaaAntiAliasing.Label),
+			(FsrAntiAliasing.Method, FsrAntiAliasing.Label)
 		})
 		{
 			int index = values.IndexOf(method);
@@ -180,21 +181,24 @@ internal static class AntiAliasingNames
 	}
 }
 
-// Replaces the CMAA2 prepare pass when FXAA, SMAA or TAA is selected.
+// Replaces the CMAA2 prepare pass when FXAA, SMAA, DLAA, FSR or TAA is selected.
 [HarmonyPatch(typeof(Program), "RenderAaPreparePasses")]
 internal static class RenderAaPreparePassesPatch
 {
 	private static bool Prefix(CommandBuffer commandBuffer, int shaderSlot, int frameIndex)
 	{
-		if (DlaaAntiAliasing.IsSelected)
+		if (TemporalAa.IsSelected)
 		{
 			if (DlaaState.TryPrepare(commandBuffer, shaderSlot, frameIndex))
 			{
 				return false;
 			}
-			// DLAA could not run this frame. If the orbit lines were held back for it, draw them into the scene now.
+			// DLAA or FSR could not run this frame. If the orbit lines were held back for it, draw them into the scene now.
 			DlaaLineDeferral.Flush(commandBuffer, shaderSlot, frameIndex);
-			DlaaSupport.ReportOnce();
+			if (DlaaAntiAliasing.IsSelected)
+			{
+				DlaaSupport.ReportOnce();
+			}
 			return true;
 		}
 		DlaaLineDeferral.Flush(commandBuffer, shaderSlot, frameIndex);
@@ -222,13 +226,13 @@ internal static class RenderAaPreparePassesPatch
 	}
 }
 
-// Replaces the final composite when FXAA, SMAA or TAA is selected. Makes the same decision as the prepare pass.
+// Replaces the final composite when FXAA, SMAA, DLAA, FSR or TAA is selected. Makes the same decision as the prepare pass.
 [HarmonyPatch(typeof(Program), "RenderFinalComposite")]
 internal static class RenderFinalCompositePatch
 {
 	private static bool Prefix(CommandBuffer commandBuffer, int shaderSlot, int frameIndex)
 	{
-		if (DlaaAntiAliasing.IsSelected)
+		if (TemporalAa.IsSelected)
 		{
 			return !DlaaState.TryFinal(commandBuffer, shaderSlot, frameIndex);
 		}

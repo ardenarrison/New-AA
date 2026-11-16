@@ -114,8 +114,9 @@ internal static class DlaaRuntime
 	}
 }
 
-// Per-viewport DLAA. Passes: tonemap composite -> camera motion vectors -> DLAA (NGX) -> copy to final.
-// If the DLAA call fails for a frame, the copy falls back to the LDR scene.
+// Per-viewport DLAA and FSR. Passes: tonemap composite -> camera motion vectors -> DLAA (NGX) or FSR Native AA -> copy to final.
+// Both resolvers take the same inputs, so everything but the resolve call is shared.
+// If the resolve fails for a frame, the copy falls back to the LDR scene.
 public sealed class DlaaRenderer : IDisposable
 {
 	private readonly Renderer _renderer;
@@ -125,6 +126,9 @@ public sealed class DlaaRenderer : IDisposable
 	private readonly RenderTarget _motionTarget;
 
 	private readonly RenderImage _output;
+
+	// FSR reads depth in SHADER_READ_ONLY_OPTIMAL, so its layout is changed around the FSR call.
+	private readonly RenderImage _depth;
 
 	private readonly VkImage _depthImage;
 
@@ -162,6 +166,10 @@ public sealed class DlaaRenderer : IDisposable
 
 	private int _lastEvaluateResult = int.MinValue;
 
+	private long _lastFsrResult = long.MinValue;
+
+	private TemporalBackend _lastBackend = TemporalBackend.None;
+
 	private bool _firstFrame = true;
 
 	public VkExtent2D Extent { get; }
@@ -175,6 +183,7 @@ public sealed class DlaaRenderer : IDisposable
 		_viewport = viewport;
 		_isMain = viewport.IsMain();
 		Extent = offscreenTarget.Extent;
+		_depth = offscreenDepth;
 		_depthImage = offscreenDepth.Image;
 		_depthView = offscreenDepth.ImageView;
 
@@ -243,7 +252,7 @@ public sealed class DlaaRenderer : IDisposable
 		return combine;
 	}
 
-	public void RenderPreparePasses(CommandBuffer commandBuffer, int frameIndex, in CompositeData compositeData, float jitterX, float jitterY)
+	public void RenderPreparePasses(CommandBuffer commandBuffer, int frameIndex, in CompositeData compositeData, float jitterX, float jitterY, TemporalBackend backend)
 	{
 		int width = (int)Extent.Width;
 		int height = (int)Extent.Height;
@@ -287,34 +296,17 @@ public sealed class DlaaRenderer : IDisposable
 
 			// Adapter: the native command buffer handle. If the property name differs in your build, change only this line.
 			VkCommandBuffer nativeCommandBuffer = commandBuffer.Handle;
-			// DLSS starts its history over on the first frame and whenever the camera jumped (new followed object, mode switch, huge move).
+			// The history starts over on the first frame, whenever the camera jumped (new followed object, mode switch, huge move),
+			// and when the player switches between DLAA and FSR.
 			bool jumped = _resetSeen != TaaCamera.ResetFrameNumber;
 			_resetSeen = TaaCamera.ResetFrameNumber;
-			uint reset = (_firstFrame || jumped) ? 1u : 0u;
-			int createResult = DlaaNative.NewAA_DlaaCreate(nativeCommandBuffer, (uint)width, (uint)height);
-			int evaluateResult = createResult == DlaaNative.NgxSuccess
-				? DlaaNative.NewAA_DlaaEvaluate(
-					nativeCommandBuffer,
-					_sceneLdrTarget.ColorImage.Image, _sceneLdrTarget.ColorImage.ImageView, VkFormat.R8G8B8A8UNorm,
-					_depthImage, _depthView, VkFormat.D32SFloat,
-					_motionTarget.ColorImage.Image, _motionTarget.ColorImage.ImageView, VkFormat.R16G16SFloat,
-					_output.Image, _output.ImageView, VkFormat.R8G8B8A8UNorm,
-					(uint)width, (uint)height,
-					jitterX, jitterY,
-					(float)width, (float)height,
-					(int)reset)
-				: -1;
-			_dlaaFrameOk = createResult == DlaaNative.NgxSuccess && evaluateResult == DlaaNative.NgxSuccess;
+			bool switched = backend != _lastBackend;
+			_lastBackend = backend;
+			bool reset = _firstFrame || jumped || switched;
+			_dlaaFrameOk = backend == TemporalBackend.Fsr
+				? EvaluateFsr(commandBuffer, nativeCommandBuffer, width, height, jitterX, jitterY, reset)
+				: EvaluateDlss(nativeCommandBuffer, width, height, jitterX, jitterY, reset);
 			_firstFrame = false;
-
-			// Log whenever the NGX results change, so the game log shows why DLAA is or isn't running.
-			if (createResult != _lastCreateResult || evaluateResult != _lastEvaluateResult)
-			{
-				_lastCreateResult = createResult;
-				_lastEvaluateResult = evaluateResult;
-				string outcome = _dlaaFrameOk ? "DLAA running." : "falling back to no anti aliasing.";
-				DefaultCategory.Log.Info("[DLAA] create 0x" + createResult.ToString("X") + ", evaluate 0x" + evaluateResult.ToString("X") + ", " + outcome, "DlaaRenderer", "NewAA", 0);
-			}
 
 			commandBuffer.PipelineBarrier2(_output, ImageBarrierInfo.Presets.SampledReadC);
 		}
@@ -335,6 +327,81 @@ public sealed class DlaaRenderer : IDisposable
 			}
 			DlaaLineDeferral.MarkDrawn(_viewport.ShaderSlot);
 		}
+	}
+
+	// DLAA: DLSS at native resolution through the native plugin. The output must already be in the storage-write layout.
+	private bool EvaluateDlss(VkCommandBuffer nativeCommandBuffer, int width, int height, float jitterX, float jitterY, bool reset)
+	{
+		int createResult = DlaaNative.NewAA_DlaaCreate(nativeCommandBuffer, (uint)width, (uint)height);
+		int evaluateResult = createResult == DlaaNative.NgxSuccess
+			? DlaaNative.NewAA_DlaaEvaluate(
+				nativeCommandBuffer,
+				_sceneLdrTarget.ColorImage.Image, _sceneLdrTarget.ColorImage.ImageView, VkFormat.R8G8B8A8UNorm,
+				_depthImage, _depthView, VkFormat.D32SFloat,
+				_motionTarget.ColorImage.Image, _motionTarget.ColorImage.ImageView, VkFormat.R16G16SFloat,
+				_output.Image, _output.ImageView, VkFormat.R8G8B8A8UNorm,
+				(uint)width, (uint)height,
+				jitterX, jitterY,
+				(float)width, (float)height,
+				reset ? 1 : 0)
+			: -1;
+		bool ok = createResult == DlaaNative.NgxSuccess && evaluateResult == DlaaNative.NgxSuccess;
+
+		// Log whenever the NGX results change, so the game log shows why DLAA is or isn't running.
+		if (createResult != _lastCreateResult || evaluateResult != _lastEvaluateResult)
+		{
+			_lastCreateResult = createResult;
+			_lastEvaluateResult = evaluateResult;
+			string outcome = ok ? "DLAA running." : "falling back to no anti aliasing.";
+			DefaultCategory.Log.Info("[DLAA] create 0x" + createResult.ToString("X") + ", evaluate 0x" + evaluateResult.ToString("X") + ", " + outcome, "DlaaRenderer", "NewAA", 0);
+		}
+		return ok;
+	}
+
+	// FSR Native AA: AMD's FSR upscaler at a 1.0x ratio, recorded straight into the game's command buffer.
+	private bool EvaluateFsr(CommandBuffer commandBuffer, VkCommandBuffer nativeCommandBuffer, int width, int height, float jitterX, float jitterY, bool reset)
+	{
+		FsrUpscaler? upscaler = FsrRuntime.Upscaler;
+		if (upscaler == null)
+		{
+			return false;
+		}
+		uint createResult = upscaler.EnsureContext((uint)width, (uint)height);
+		uint dispatchResult = uint.MaxValue;
+		if (createResult == FsrNative.ReturnOk)
+		{
+			// The motion passes sampled depth in DEPTH_STENCIL_READ_ONLY_OPTIMAL. FSR expects every input in SHADER_READ_ONLY_OPTIMAL
+			// (its views use the depth aspect) and leaves it there, so the layout goes back afterwards.
+			commandBuffer.PipelineBarrier2(_depth, ImageBarrierInfo.Presets.SampledReadC);
+			FsrRuntime.CameraPlanes(Program.GetMainCamera(), out float near, out float far, out float fov);
+			dispatchResult = upscaler.Dispatch(
+				nativeCommandBuffer.VkHandle,
+				_sceneLdrTarget.ColorImage.Image.VkHandle,
+				_depthImage.VkHandle,
+				_motionTarget.ColorImage.Image.VkHandle,
+				_output.Image.VkHandle,
+				(uint)width, (uint)height,
+				jitterX, jitterY,
+				reset,
+				near, far, fov);
+			commandBuffer.PipelineBarrier2(_depth, ImageBarrierInfo.Presets.DepthSampledReadC);
+		}
+		bool ok = createResult == FsrNative.ReturnOk && dispatchResult == FsrNative.ReturnOk;
+
+		long combined = ((long)createResult << 32) | dispatchResult;
+		if (combined != _lastFsrResult)
+		{
+			_lastFsrResult = combined;
+			string dispatchText = createResult == FsrNative.ReturnOk ? dispatchResult.ToString() : "skipped";
+			string outcome = ok ? "FSR running (" + upscaler.ProviderName + ")." : "falling back to no anti aliasing.";
+			FsrRuntime.Log("create " + createResult + ", dispatch " + dispatchText + ", " + outcome);
+		}
+		if (createResult != FsrNative.ReturnOk)
+		{
+			// No FSR version could start at this size. Retrying every frame would only repeat the failure.
+			FsrRuntime.Disable("No FSR version could create a context (error " + createResult + ").");
+		}
+		return ok;
 	}
 
 	public void RenderFinalBlit(CommandBuffer commandBuffer, int frameIndex)
@@ -364,10 +431,15 @@ public sealed class DlaaRenderer : IDisposable
 	}
 }
 
-// Owns the DLAA renderers. Mirrors TaaState. Returns false from TryPrepare when DLAA can't run, so the original path runs.
+// Owns the DLAA/FSR renderers. Mirrors TaaState. Returns false from TryPrepare when the selected method can't run, so the original
+// path runs.
 internal static class DlaaState
 {
 	private static readonly Dictionary<int, DlaaRenderer> Renderers = new Dictionary<int, DlaaRenderer>();
+
+	// Viewports whose prepare pass ran this frame. The final pass only runs for those, so a renderer left over from an earlier frame
+	// (for example DLAA's, after switching to an FSR that failed to start) never shows a stale image.
+	private static readonly HashSet<int> Prepared = new HashSet<int>();
 
 	private static readonly string[] ShaderIds = { "TaaVert", "DlaaMotionFrag", "DlaaBodyMotionFrag", "DlaaCopyFrag", "DlaaLineVert", "DlaaLineFrag", "DlaaLineCombineFrag" };
 
@@ -383,12 +455,17 @@ internal static class DlaaState
 
 	public static bool TryPrepare(CommandBuffer commandBuffer, int shaderSlot, int frameIndex)
 	{
-		if (!ShadersAvailable())
+		Prepared.Remove(shaderSlot);
+		TemporalBackend backend = TemporalAa.Selected;
+		if (backend == TemporalBackend.None || !ShadersAvailable())
 		{
 			return false;
 		}
 		Renderer renderer = Program.GetRenderer();
-		if (!DlaaRuntime.EnsureInitialized(renderer))
+		bool runtimeReady = backend == TemporalBackend.Fsr
+			? FsrRuntime.EnsureInitialized(renderer)
+			: DlaaRuntime.EnsureInitialized(renderer);
+		if (!runtimeReady)
 		{
 			return false;
 		}
@@ -399,6 +476,7 @@ internal static class DlaaState
 		}
 		// The native plugin owns one DLSS feature. Running it for a second viewport (the game has a 128 x 128 one) made it tear down and
 		// rebuild the feature every frame, so nothing ever accumulated. Only the main viewport uses DLAA. Others take the game's own path.
+		// FSR keeps one context too, and only the main camera is jittered, so the same rule applies to it.
 		if (!viewport.IsMain())
 		{
 			return false;
@@ -416,19 +494,20 @@ internal static class DlaaState
 			DlaaBodies.Capture(TaaCamera.FrameNumber, Program.GetMainCamera(), jumped, TaaCamera.CameraTranslation);
 		}
 		commandBuffer.PipelineBarrier2(viewport.OffscreenTarget.DepthImage, ImageBarrierInfo.Presets.DepthSampledReadC);
-		dlaa.RenderPreparePasses(commandBuffer, frameIndex, Program.TonemapData, TaaCamera.JitterPixelsX, TaaCamera.JitterPixelsY);
+		dlaa.RenderPreparePasses(commandBuffer, frameIndex, Program.TonemapData, TaaCamera.JitterPixelsX, TaaCamera.JitterPixelsY, backend);
+		Prepared.Add(shaderSlot);
 		return true;
 	}
 
-	// True when this viewport has a DLAA renderer that will draw orbit lines after DLSS.
+	// True when this viewport has a renderer that will draw orbit lines after DLSS or FSR.
 	public static bool CanDrawLines(int shaderSlot)
 	{
-		return DlaaRuntime.IsReady && Renderers.TryGetValue(shaderSlot, out DlaaRenderer? dlaa) && dlaa.OverlayReady;
+		return TemporalAa.IsReady && Renderers.TryGetValue(shaderSlot, out DlaaRenderer? dlaa) && dlaa.OverlayReady;
 	}
 
 	public static bool TryFinal(CommandBuffer commandBuffer, int shaderSlot, int frameIndex)
 	{
-		if (!DlaaAntiAliasing.IsSelected || !Renderers.TryGetValue(shaderSlot, out DlaaRenderer? dlaa))
+		if (!TemporalAa.IsSelected || !Prepared.Remove(shaderSlot) || !Renderers.TryGetValue(shaderSlot, out DlaaRenderer? dlaa))
 		{
 			return false;
 		}

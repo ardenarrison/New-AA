@@ -338,7 +338,7 @@ internal static class DlaaLineDeferral
 	public static bool TryDefer(IViewport viewport)
 	{
 		int slot = viewport.ShaderSlot;
-		if (_flushing || (uint)slot >= (uint)Deferred.Length || !DlaaAntiAliasing.IsSelected || !viewport.IsMain() || !DlaaState.CanDrawLines(slot))
+		if (_flushing || (uint)slot >= (uint)Deferred.Length || !TemporalAa.IsSelected || !viewport.IsMain() || !DlaaState.CanDrawLines(slot))
 		{
 			return false;
 		}

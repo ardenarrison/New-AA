@@ -70,8 +70,8 @@ internal static class TaaCamera
 	// Moving the camera by more than this fraction of its distance to the followed object in one frame is a jump.
 	private const double JumpDistanceFraction = 0.5;
 
-	// Jitter is applied for TAA (when enabled) and for DLAA once NGX is running.
-	public static bool IsActive => (TaaAntiAliasing.Enabled && GameSettings.Current.AntiAliasingMethod == TaaAntiAliasing.Method) || DlaaRuntime.IsReady;
+	// Jitter is applied for TAA (when enabled), for DLAA once NGX is running and for FSR once its runtime is loaded.
+	public static bool IsActive => (TaaAntiAliasing.Enabled && GameSettings.Current.AntiAliasingMethod == TaaAntiAliasing.Method) || TemporalAa.IsReady;
 
 	// The camera is not being tracked (DLAA and TAA are off). The next tracked frame starts over.
 	public static void Invalidate()
@@ -124,7 +124,7 @@ internal static class TaaCamera
 			if (_jumpsLogged < MaxJumpsLogged)
 			{
 				_jumpsLogged++;
-				Brutal.Logging.DefaultCategory.Log.Info("[DLAA] Camera jump, restarting DLSS history: " + reason, "Advance", "NewAA", 0);
+				Brutal.Logging.DefaultCategory.Log.Info("[DLAA/FSR] Camera jump, restarting the temporal history: " + reason, "Advance", "NewAA", 0);
 			}
 		}
 		_previousFollowing = following;
@@ -180,7 +180,7 @@ internal static class CameraOnFramePatch
 	{
 		// Safety: if Program.Render never finished last frame, put the unjittered matrices back before anything reads them.
 		JitterWindow.End();
-		if (!TaaAntiAliasing.Enabled && !DlaaAntiAliasing.IsSelected)
+		if (!TaaAntiAliasing.Enabled && !TemporalAa.IsSelected)
 		{
 			// Not tracking. The matrices stored for the GPU are from the last tracked frame, so they must never be used again.
 			// (Leaving this set after DLAA was switched off made the geometry use a frozen camera while everything else used the live one.)
@@ -262,7 +262,7 @@ internal static class UpdateShaderDataPatch
 	private static void Prefix(IViewport viewport)
 	{
 		// Checked again here, not just trusted from the camera patch: the anti-aliasing setting can change after Camera.OnFrame ran.
-		if (TaaCamera.JitterPending && (TaaAntiAliasing.Enabled || DlaaAntiAliasing.IsSelected) && viewport.IsMain())
+		if (TaaCamera.JitterPending && (TaaAntiAliasing.Enabled || TemporalAa.IsSelected) && viewport.IsMain())
 		{
 			JitterWindow.Begin(viewport.GetCamera());
 		}

@@ -16,6 +16,7 @@ public class FxaaStarMapMod
 	public void OnBeforeMain()
 	{
 		DlaaDeviceExtensions.Apply();
+		FsrDeviceFeatures.Apply();
 	}
 
 	// Runs right after the mod loads, before the game prepares its systems.

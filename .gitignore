@@ -15,6 +15,10 @@ newaa.local.json
 DLSS_SDK/
 nvngx_*.dll
 
+# AMD's FSR runtime (two signed DLLs, 36 MB). MIT licensed, but downloaded by setup.py / build.py from AMD's repository at a
+# pinned release instead of being stored here.
+FSR_SDK/
+
 # The native plugin links NVIDIA's library. build.py compiles it (python build.py --native), and a built copy
 # is best published as a release download rather than stored in the repository.
 Native/NewAANgx.dll
