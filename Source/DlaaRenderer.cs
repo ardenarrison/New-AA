@@ -38,7 +38,7 @@ internal static class DlaaRuntime
 {
 	// NGX project ID for New AA (a GUID, as NVIDIA's SDK asks for when no application ID was issued) and the version sent with it.
 	private const string ProjectId = "968cb9ed-5fa2-420d-b5c6-52ce9254da73";
-	private const string EngineVersion = "1.0.0";
+	private const string EngineVersion = "1.1.0";
 
 	private static bool _attempted;
 

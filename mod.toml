@@ -1,7 +1,7 @@
 # StarMap: the mod id must match the assembly name (newaa.dll) and the manifest.toml id.
 id = "newaa"
 name = "newaa"
-version = "1.0.0"
+version = "1.1.0"
 description = "Adds FXAA, SMAA, DLAA (NVIDIA RTX) and FSR Native AA as Anti-Aliasing options."
 
 # The game's content loader only registers assets declared in these XML files.

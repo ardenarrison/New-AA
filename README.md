@@ -5,7 +5,7 @@ Each runs after the game's tonemap composite, in place of its CMAA2 pass when se
 
 ## Install (Windows)
 
-Download `newaa-1.0.0.zip` from the Releases page. It contains the built mod, so nothing needs to be compiled. New AA supports Windows only for now.
+Download `newaa-1.1.0.zip` from the Releases page. It contains the built mod, so nothing needs to be compiled. New AA supports Windows only for now.
 
 1. Close the game and StarMap.
 2. Extract the `newaa` folder from the zip into `Documents\My Games\Kitten Space Agency\mods\`, so that `mods\newaa\mod.toml` exists.
