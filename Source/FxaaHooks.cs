@@ -1,5 +1,5 @@
 // Copyright 2026 Arden Arrison. Licensed under the Apache License 2.0 (see LICENSE).
-// StarMap injection layer for the New AA mod (FXAA, SMAA, TAA).
+// StarMap injection layer for the New AA mod (FXAA, SMAA, TAA, DLAA, FSR Native AA).
 // Patches are applied by FxaaMod.Initialize(), called from FxaaStarMapMod.OnImmediateLoad.
 using System;
 using System.Collections.Generic;
@@ -128,14 +128,14 @@ internal static class FxaaState
 	}
 }
 
-// Adds FXAA, SMAA, DLAA and FSR Native AA to the list of options the Anti-Aliasing dropdown shows.
+// Adds FXAA, SMAA, TAA, DLAA and FSR Native AA to the list of options the Anti-Aliasing dropdown shows.
 [HarmonyPatch(typeof(GameSettings), nameof(GameSettings.GetAvailableAntiAliasingMethods))]
 internal static class AvailableAntiAliasingMethodsPatch
 {
 	private static void Postfix(ref ReadOnlySpan<GameSettings.AntiAliasing> __result)
 	{
 		List<GameSettings.AntiAliasing> methods = new List<GameSettings.AntiAliasing>(__result.ToArray());
-		foreach (GameSettings.AntiAliasing extra in new[] { FxaaAntiAliasing.Method, SmaaAntiAliasing.Method, DlaaAntiAliasing.Method, FsrAntiAliasing.Method })
+		foreach (GameSettings.AntiAliasing extra in new[] { FxaaAntiAliasing.Method, SmaaAntiAliasing.Method, TaaAntiAliasing.Method, DlaaAntiAliasing.Method, FsrAntiAliasing.Method })
 		{
 			if (!methods.Contains(extra))
 			{
@@ -160,6 +160,7 @@ internal static class AntiAliasingNames
 		{
 			(FxaaAntiAliasing.Method, FxaaAntiAliasing.Label),
 			(SmaaAntiAliasing.Method, SmaaAntiAliasing.Label),
+			(TaaAntiAliasing.Method, TaaAntiAliasing.Label),
 			(DlaaAntiAliasing.Method, DlaaAntiAliasing.Label),
 			(FsrAntiAliasing.Method, FsrAntiAliasing.Label)
 		})
@@ -181,7 +182,7 @@ internal static class AntiAliasingNames
 	}
 }
 
-// Replaces the CMAA2 prepare pass when FXAA, SMAA, DLAA, FSR or TAA is selected.
+// Replaces the CMAA2 prepare pass when FXAA, SMAA, TAA, DLAA or FSR is selected.
 [HarmonyPatch(typeof(Program), "RenderAaPreparePasses")]
 internal static class RenderAaPreparePassesPatch
 {
@@ -193,7 +194,7 @@ internal static class RenderAaPreparePassesPatch
 			{
 				return false;
 			}
-			// DLAA or FSR could not run this frame. If the orbit lines were held back for it, draw them into the scene now.
+			// DLAA, FSR or TAA could not run this frame. If the orbit lines were held back for it, draw them into the scene now.
 			DlaaLineDeferral.Flush(commandBuffer, shaderSlot, frameIndex);
 			if (DlaaAntiAliasing.IsSelected)
 			{
@@ -202,10 +203,6 @@ internal static class RenderAaPreparePassesPatch
 			return true;
 		}
 		DlaaLineDeferral.Flush(commandBuffer, shaderSlot, frameIndex);
-		if (TaaState.IsActive)
-		{
-			return !TaaState.TryPrepare(commandBuffer, shaderSlot, frameIndex);
-		}
 		if (SmaaState.IsActive)
 		{
 			SmaaRenderer? smaa = SmaaState.GetOrCreate(shaderSlot);
@@ -226,7 +223,7 @@ internal static class RenderAaPreparePassesPatch
 	}
 }
 
-// Replaces the final composite when FXAA, SMAA, DLAA, FSR or TAA is selected. Makes the same decision as the prepare pass.
+// Replaces the final composite when FXAA, SMAA, TAA, DLAA or FSR is selected. Makes the same decision as the prepare pass.
 [HarmonyPatch(typeof(Program), "RenderFinalComposite")]
 internal static class RenderFinalCompositePatch
 {
@@ -235,10 +232,6 @@ internal static class RenderFinalCompositePatch
 		if (TemporalAa.IsSelected)
 		{
 			return !DlaaState.TryFinal(commandBuffer, shaderSlot, frameIndex);
-		}
-		if (TaaState.IsActive)
-		{
-			return !TaaState.TryFinal(commandBuffer, shaderSlot, frameIndex);
 		}
 		if (SmaaState.IsActive)
 		{

@@ -1,14 +1,13 @@
 // Copyright 2026 Arden Arrison. Licensed under the Apache License 2.0 (see LICENSE).
 using System;
-using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Brutal;
+using Brutal.Logging;
 using Brutal.Memory;
 using Brutal.Numerics;
 using Brutal.VulkanApi;
 using Brutal.VulkanApi.Abstractions;
 using Core;
-using HarmonyLib;
 using KSA.Rendering;
 using KSA.Rendering.PostProcessing;
 using RenderCore;
@@ -16,171 +15,58 @@ using RenderCore.Pipelines;
 
 namespace KSA.Mods.NewAA;
 
-// The new Anti-Aliasing menu entry. Uses enum value 7, which the game's enum does not define.
+// The TAA menu entry. Uses enum value 7, which the game's enum does not define.
 public static class TaaAntiAliasing
 {
 	public const int EnumValue = 7;
 
-	// Off: TAA is not offered in the dropdown. Set to true to bring it back.
-	public const bool Enabled = false;
-
 	public const string Label = "TAA";
 
 	public static readonly GameSettings.AntiAliasing Method = (GameSettings.AntiAliasing)EnumValue;
+
+	public static bool IsSelected => GameSettings.Current.AntiAliasingMethod == Method;
 }
 
-// Push constant for TaaResolveFrag.frag. Layout matches its push_constant block.
-[StructLayout(LayoutKind.Sequential, Pack = 1)]
-public struct TaaData
+// TAA needs no runtime, only its shaders. It is ready once they are registered, unless setting it up failed this session.
+internal static class TaaRuntime
 {
-	public float4x4 PrevViewProjection;
+	private static readonly string[] ShaderIds = { "TaaResolveFrag", "TaaSharpenFrag", "TaaDepthFrag" };
 
-	public float4x4 InvViewProjection;
+	private static bool _ready;
 
-	public float4 RtMetrics;
-
-	public float HistoryWeight;
-
-	public float CameraMotion;
-}
-
-// Per-viewport TAA. Passes: tonemap composite -> resolve (writes one history buffer, reads the other) -> copy to final.
-// The history buffers alternate each frame.
-public sealed class TaaRenderer : IDisposable
-{
-	private const float HistoryWeight = 0.9f;
-
-	private readonly RenderTarget _sceneLdrTarget;
-
-	private readonly RenderTarget[] _historyTargets;
-
-	private readonly ScreenspaceRenderer _sceneLdrComposite;
-
-	private readonly ScreenspaceRenderer[] _resolvePasses;
-
-	private readonly ScreenspaceRenderer[] _copyPasses;
-
-	private int _writeIndex;
-
-	private int _activeIndex;
-
-	private bool _historyValid;
-
-	public VkExtent2D Extent { get; }
-
-	public TaaRenderer(Renderer renderer, string name, int frameCount, RenderTarget offscreenTarget, IRenderPassInfo finalPassInfo, ShaderReference[] compositeShaders, VkPushConstantRange compositeRange, VkSampler pointSampler, VkSampler linearSampler, ShaderReference[] resolveShaders, ShaderReference[] copyShaders, VkImageView depthView)
-	{
-		Extent = offscreenTarget.Extent;
-		_sceneLdrTarget = AaPasses.CreateTarget(renderer, name + " Scene LDR", Extent, VkFormat.R8G8B8A8UNorm);
-		_historyTargets = new RenderTarget[2]
-		{
-			AaPasses.CreateTarget(renderer, name + " History 0", Extent, VkFormat.R16G16B16A16SFloat),
-			AaPasses.CreateTarget(renderer, name + " History 1", Extent, VkFormat.R16G16B16A16SFloat)
-		};
-
-		_sceneLdrComposite = AaPasses.CreatePass(renderer, _sceneLdrTarget, compositeShaders, 1, frameCount, pointSampler, compositeRange, false);
-		_sceneLdrComposite.AddImage(offscreenTarget.ColorImage.ImageView, VkImageLayout.ShaderReadOnlyOptimal);
-		_sceneLdrComposite.Build();
-
-		VkPushConstantRange resolveRange = new VkPushConstantRange
-		{
-			StageFlags = VkShaderStageFlags.FragmentBit,
-			Offset = ByteSize.Zero,
-			Size = ByteSize.Of<TaaData>()
-		};
-		_resolvePasses = new ScreenspaceRenderer[2];
-		_copyPasses = new ScreenspaceRenderer[2];
-		for (int i = 0; i < 2; i++)
-		{
-			// Pass i writes history i and reads history 1 - i.
-			int read = 1 - i;
-			ScreenspaceRenderer resolve = AaPasses.CreatePass(renderer, _historyTargets[i], resolveShaders, 3, frameCount, linearSampler, resolveRange, true);
-			resolve.AddImage(_sceneLdrTarget.ColorImage.ImageView, VkImageLayout.ShaderReadOnlyOptimal);
-			resolve.AddImage(_historyTargets[read].ColorImage.ImageView, VkImageLayout.ShaderReadOnlyOptimal);
-			resolve.AddImage(depthView, VkImageLayout.DepthStencilReadOnlyOptimal);
-			resolve.Build();
-			_resolvePasses[i] = resolve;
-
-			ScreenspaceRenderer copy = AaPasses.CreatePass(renderer, finalPassInfo, copyShaders, 1, frameCount, linearSampler, AaPasses.PushRange(VkShaderStageFlags.FragmentBit), true);
-			copy.AddImage(_historyTargets[i].ColorImage.ImageView, VkImageLayout.ShaderReadOnlyOptimal);
-			copy.Build();
-			_copyPasses[i] = copy;
-		}
-	}
-
-	// Composite, then resolve into this frame's history buffer. Call after the depth image is readable.
-	public void RenderPreparePasses(CommandBuffer commandBuffer, int frameIndex, in CompositeData compositeData)
-	{
-		using (commandBuffer.TagRegion(Profiler.GpuTag.Cmaa2LdrComposite))
-		{
-			AaPasses.BeginCleared(commandBuffer, _sceneLdrTarget);
-			_sceneLdrComposite.Render(commandBuffer, frameIndex, compositeData);
-			AaPasses.EndSampled(commandBuffer, _sceneLdrTarget);
-
-			TaaData push = new TaaData
-			{
-				PrevViewProjection = TaaCamera.PreviousViewProjection,
-				InvViewProjection = TaaCamera.CurrentInverseViewProjection,
-				RtMetrics = new float4(1f / (float)Extent.Width, 1f / (float)Extent.Height, Extent.Width, Extent.Height),
-				HistoryWeight = _historyValid ? HistoryWeight : 0f,
-				CameraMotion = TaaCamera.CameraMotion
-			};
-			int write = _writeIndex;
-			AaPasses.BeginCleared(commandBuffer, _historyTargets[write]);
-			_resolvePasses[write].Render(commandBuffer, frameIndex, push);
-			AaPasses.EndSampled(commandBuffer, _historyTargets[write]);
-
-			_activeIndex = write;
-		}
-		_writeIndex = 1 - _writeIndex;
-		_historyValid = true;
-	}
-
-	// Copies the resolved frame to the final target. Recorded inside the same pass as the original final composite.
-	public void RenderFinalBlit(CommandBuffer commandBuffer, int frameIndex)
-	{
-		using (commandBuffer.TagRegion(Profiler.GpuTag.Cmaa2Blit))
-		{
-			_copyPasses[_activeIndex].Render(commandBuffer, frameIndex, AaPasses.PushFor(Extent));
-		}
-	}
-
-	public void Dispose()
-	{
-		for (int i = 0; i < 2; i++)
-		{
-			_copyPasses[i].Dispose();
-			_resolvePasses[i].Dispose();
-		}
-		_sceneLdrComposite.Dispose();
-		for (int i = 0; i < 2; i++)
-		{
-			_historyTargets[i].Dispose();
-		}
-		_sceneLdrTarget.Dispose();
-	}
-}
-
-// Owns the TAA renderers and their shared resources. Mirrors SmaaState.
-internal static class TaaState
-{
-	private static readonly Dictionary<int, TaaRenderer> Renderers = new Dictionary<int, TaaRenderer>();
-
-	private static readonly string[] ShaderIds = { "TaaVert", "TaaResolveFrag", "TaaCopyFrag" };
-
-	private static ShaderReference[]? _compositeShaders;
-
-	private static VkPushConstantRange _compositeRange;
-
-	private static VkSampler _linearSampler;
-
-	private static bool _sharedReady;
+	private static bool _disabled;
 
 	private static bool _warnedMissing;
 
-	public static bool IsActive => TaaAntiAliasing.Enabled && GameSettings.Current.AntiAliasingMethod == TaaAntiAliasing.Method;
+	public static bool IsReady
+	{
+		get
+		{
+			if (!_ready && !_disabled)
+			{
+				_ready = ShadersRegistered();
+			}
+			return _ready && !_disabled;
+		}
+	}
 
-	private static bool ResourcesAvailable()
+	// Turns TAA off for this session. The game then uses no anti-aliasing while TAA is selected.
+	public static void Disable(string reason)
+	{
+		if (_disabled)
+		{
+			return;
+		}
+		_disabled = true;
+		Log(reason + " TAA is off for this session, using no anti aliasing.");
+	}
+
+	public static void Log(string message)
+	{
+		DefaultCategory.Log.Info("[TAA] " + message, "TaaRuntime", "NewAA", 0);
+	}
+
+	private static bool ShadersRegistered()
 	{
 		foreach (string id in ShaderIds)
 		{
@@ -189,114 +75,152 @@ internal static class TaaState
 				if (!_warnedMissing)
 				{
 					_warnedMissing = true;
-					Console.Error.WriteLine("[TAA] Missing shader '" + id + "'. Falling back to no anti-aliasing.");
+					Log("Missing shader '" + id + "'. Using no anti aliasing.");
 				}
 				return false;
 			}
 		}
 		return true;
 	}
+}
 
-	// Returns true when the TAA prepare pass ran. Returns false when the original path should run.
-	public static bool TryPrepare(CommandBuffer commandBuffer, int shaderSlot, int frameIndex)
-	{
-		TaaRenderer? taa = GetOrCreate(shaderSlot);
-		IViewport? viewport = FxaaState.FindViewport(shaderSlot);
-		if (taa == null || viewport == null)
-		{
-			return false;
-		}
-		// Same depth barrier the engine uses before sampling the offscreen depth.
-		commandBuffer.PipelineBarrier2(viewport.OffscreenTarget.DepthImage!, ImageBarrierInfo.Presets.DepthSampledReadC);
-		taa.RenderPreparePasses(commandBuffer, frameIndex, Program.TonemapData);
-		return true;
-	}
+// Push constant for TaaResolveFrag.frag. Layout matches its push_constant block.
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct TaaData
+{
+	// x = 1/width, y = 1/height, z = width, w = height
+	public float4 RtMetrics;
 
-	// Returns true when the TAA final pass ran. Never creates anything, so it matches TryPrepare.
-	public static bool TryFinal(CommandBuffer commandBuffer, int shaderSlot, int frameIndex)
-	{
-		TaaRenderer? taa = GetExisting(shaderSlot);
-		if (taa == null)
-		{
-			return false;
-		}
-		taa.RenderFinalBlit(commandBuffer, frameIndex);
-		return true;
-	}
+	// xy = this frame's jitter in render pixels, z = 1 to use the history or 0 to start over, w = unused
+	public float4 Params;
+}
 
-	private static TaaRenderer? GetOrCreate(int shaderSlot)
-	{
-		if (!IsActive || !ResourcesAvailable())
-		{
-			return null;
-		}
-		IViewport? viewport = FxaaState.FindViewport(shaderSlot);
-		if (viewport == null)
-		{
-			return null;
-		}
-		VkExtent2D extent = viewport.OffscreenTarget.Extent;
-		if (Renderers.TryGetValue(shaderSlot, out TaaRenderer? existing))
-		{
-			if (existing.Extent.Width == extent.Width && existing.Extent.Height == extent.Height)
-			{
-				return existing;
-			}
-			// Resize: new history buffers, so history starts over.
-			existing.Dispose();
-			Renderers.Remove(shaderSlot);
-		}
-		EnsureShared();
-		Renderer renderer = Program.GetRenderer();
-		TaaRenderer created = new TaaRenderer(
-			renderer,
-			"TAA Viewport " + shaderSlot,
-			renderer.MaxFramesInFlight,
-			viewport.OffscreenTarget,
-			viewport.CompositeTarget,
-			_compositeShaders!,
-			_compositeRange,
-			Program.PointClampedSampler,
-			_linearSampler,
-			ShadersFor("TaaVert", "TaaResolveFrag"),
-			ShadersFor("TaaVert", "TaaCopyFrag"),
-			viewport.OffscreenTarget.DepthImage!.ImageView);
-		Renderers[shaderSlot] = created;
-		return created;
-	}
+// The TAA resolve, used by DlaaRenderer in place of DLSS or FSR. Inputs are the ones those get: the jittered LDR scene, the motion
+// vectors and the depth. Passes: resolve (reads one history buffer, writes the other) -> sharpen into the output the final pass shows
+// -> keep the depth for the next frame's resolve (TaaDepthFrag, which stores the nearest depth around each pixel).
+// The history buffers are 16-bit float, because an 8-bit history that keeps 90% each frame stops a few steps short of the true colour.
+internal sealed class TaaResolver : IDisposable
+{
+	private readonly RenderTarget[] _history;
 
-	private static TaaRenderer? GetExisting(int shaderSlot)
-	{
-		if (!IsActive)
-		{
-			return null;
-		}
-		return Renderers.TryGetValue(shaderSlot, out TaaRenderer? renderer) ? renderer : null;
-	}
+	private readonly RenderTarget _output;
 
-	private static ShaderReference[] ShadersFor(string vertexId, string fragmentId)
+	private readonly RenderTarget _previousDepth;
+
+	private readonly ScreenspaceRenderer[] _resolvePasses;
+
+	private readonly ScreenspaceRenderer[] _sharpenPasses;
+
+	private readonly ScreenspaceRenderer _depthPass;
+
+	private int _writeIndex;
+
+	private bool _historyInitialized;
+
+	public VkExtent2D Extent { get; }
+
+	// The sharpened result. Readable by the final pass after Resolve.
+	public VkImageView OutputView => _output.ColorImage!.ImageView;
+
+	public TaaResolver(Renderer renderer, string name, int frameCount, VkExtent2D extent, VkSampler linearSampler, VkImageView sceneView, VkImageView motionView, VkImageView depthView)
 	{
-		return new ShaderReference[2]
+		Extent = extent;
+		ShaderReference vertex = ModLibrary.Get<ShaderReference>("TaaVert");
+		ShaderReference[] resolveShaders = { vertex, ModLibrary.Get<ShaderReference>("TaaResolveFrag") };
+		ShaderReference[] sharpenShaders = { vertex, ModLibrary.Get<ShaderReference>("TaaSharpenFrag") };
+		ShaderReference[] depthShaders = { vertex, ModLibrary.Get<ShaderReference>("TaaDepthFrag") };
+
+		_history = new RenderTarget[2]
 		{
-			ModLibrary.Get<ShaderReference>(vertexId),
-			ModLibrary.Get<ShaderReference>(fragmentId)
+			AaPasses.CreateTarget(renderer, name + " TAA History 0", extent, VkFormat.R16G16B16A16SFloat),
+			AaPasses.CreateTarget(renderer, name + " TAA History 1", extent, VkFormat.R16G16B16A16SFloat)
 		};
+		_output = AaPasses.CreateTarget(renderer, name + " TAA Output", extent, VkFormat.R8G8B8A8UNorm);
+		// 32-bit: the depth of anything far away is tiny (reverse-Z), and the resolve only needs to know whether it is exactly 0.
+		_previousDepth = AaPasses.CreateTarget(renderer, name + " TAA Previous Depth", extent, VkFormat.R32SFloat);
+
+		_depthPass = AaPasses.CreatePass(renderer, _previousDepth, depthShaders, 1, frameCount, linearSampler, AaPasses.PushRange(VkShaderStageFlags.FragmentBit), true);
+		_depthPass.AddImage(depthView, VkImageLayout.DepthStencilReadOnlyOptimal);
+		_depthPass.Build();
+
+		VkPushConstantRange resolveRange = new VkPushConstantRange
+		{
+			StageFlags = VkShaderStageFlags.FragmentBit,
+			Offset = ByteSize.Zero,
+			Size = ByteSize.Of<TaaData>()
+		};
+		_resolvePasses = new ScreenspaceRenderer[2];
+		_sharpenPasses = new ScreenspaceRenderer[2];
+		for (int i = 0; i < 2; i++)
+		{
+			// Pass i writes history i and reads history 1 - i.
+			ScreenspaceRenderer resolve = AaPasses.CreatePass(renderer, _history[i], resolveShaders, 5, frameCount, linearSampler, resolveRange, true);
+			resolve.AddImage(sceneView, VkImageLayout.ShaderReadOnlyOptimal);
+			resolve.AddImage(_history[1 - i].ColorImage!.ImageView, VkImageLayout.ShaderReadOnlyOptimal);
+			resolve.AddImage(motionView, VkImageLayout.ShaderReadOnlyOptimal);
+			resolve.AddImage(depthView, VkImageLayout.DepthStencilReadOnlyOptimal);
+			resolve.AddImage(_previousDepth.ColorImage!.ImageView, VkImageLayout.ShaderReadOnlyOptimal);
+			resolve.Build();
+			_resolvePasses[i] = resolve;
+
+			ScreenspaceRenderer sharpen = AaPasses.CreatePass(renderer, _output, sharpenShaders, 1, frameCount, linearSampler, AaPasses.PushRange(VkShaderStageFlags.FragmentBit), true);
+			sharpen.AddImage(_history[i].ColorImage!.ImageView, VkImageLayout.ShaderReadOnlyOptimal);
+			sharpen.Build();
+			_sharpenPasses[i] = sharpen;
+		}
 	}
 
-	private static void EnsureShared()
+	// Records the resolve and the sharpen pass. The scene and motion targets must be readable and the depth in its sampled layout.
+	public void Resolve(CommandBuffer commandBuffer, int frameIndex, float jitterX, float jitterY, bool reset)
 	{
-		if (_sharedReady)
+		int write = _writeIndex;
+		int read = 1 - write;
+		if (!_historyInitialized)
 		{
-			return;
+			// The resolve always binds the other history buffer and the previous depth, so they have to be in a readable layout from the
+			// first frame on.
+			AaPasses.BeginCleared(commandBuffer, _history[read]);
+			AaPasses.EndSampled(commandBuffer, _history[read]);
+			AaPasses.BeginCleared(commandBuffer, _previousDepth);
+			AaPasses.EndSampled(commandBuffer, _previousDepth);
+			_historyInitialized = true;
+			reset = true;
 		}
-		_compositeShaders = new ShaderReference[2]
+
+		TaaData push = new TaaData
 		{
-			ModLibrary.Get<ShaderReference>("ScreenspaceVert"),
-			ModLibrary.Get<ShaderReference>("CompositeFrag")
+			RtMetrics = new float4(1f / (float)Extent.Width, 1f / (float)Extent.Height, Extent.Width, Extent.Height),
+			Params = new float4(jitterX, jitterY, reset ? 0f : 1f, 0f)
 		};
-		object rangeBoxed = AccessTools.Field(typeof(Program), "_compositePushConstantRange").GetValue(Program.Instance) ?? throw new InvalidOperationException("Program._compositePushConstantRange not found");
-		_compositeRange = (VkPushConstantRange)rangeBoxed;
-		_linearSampler = Program.GetRenderer().Device.CreateSampler(Presets.Sampler.SamplerLinearClamped, null);
-		_sharedReady = true;
+		AaPasses.BeginCleared(commandBuffer, _history[write]);
+		_resolvePasses[write].Render(commandBuffer, frameIndex, push);
+		AaPasses.EndSampled(commandBuffer, _history[write]);
+
+		AaPasses.BeginCleared(commandBuffer, _output);
+		_sharpenPasses[write].Render(commandBuffer, frameIndex, AaPasses.PushFor(Extent));
+		AaPasses.EndSampled(commandBuffer, _output);
+
+		// After the resolve has read last frame's depth.
+		AaPasses.BeginCleared(commandBuffer, _previousDepth);
+		_depthPass.Render(commandBuffer, frameIndex, AaPasses.PushFor(Extent));
+		AaPasses.EndSampled(commandBuffer, _previousDepth);
+
+		_writeIndex = read;
+	}
+
+	public void Dispose()
+	{
+		_depthPass.Dispose();
+		for (int i = 0; i < 2; i++)
+		{
+			_sharpenPasses[i].Dispose();
+			_resolvePasses[i].Dispose();
+		}
+		_previousDepth.Dispose();
+		_output.Dispose();
+		for (int i = 0; i < 2; i++)
+		{
+			_history[i].Dispose();
+		}
 	}
 }
