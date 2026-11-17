@@ -11,7 +11,8 @@
 
   <Shader Id="TaaVert" Path="Shaders/TaaVert.vert" />
   <Shader Id="TaaResolveFrag" Path="Shaders/TaaResolveFrag.frag" />
-  <Shader Id="TaaCopyFrag" Path="Shaders/TaaCopyFrag.frag" />
+  <Shader Id="TaaSharpenFrag" Path="Shaders/TaaSharpenFrag.frag" />
+  <Shader Id="TaaDepthFrag" Path="Shaders/TaaDepthFrag.frag" />
 
   <Shader Id="DlaaMotionFrag" Path="Shaders/DlaaMotionFrag.frag" />
   <Shader Id="DlaaBodyMotionFrag" Path="Shaders/DlaaBodyMotionFrag.frag" />

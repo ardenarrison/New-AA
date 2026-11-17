@@ -114,12 +114,24 @@ internal static class DlaaRuntime
 	}
 }
 
-// Per-viewport DLAA and FSR. Passes: tonemap composite -> camera motion vectors -> DLAA (NGX) or FSR Native AA -> copy to final.
-// Both resolvers take the same inputs, so everything but the resolve call is shared.
+// Per-viewport DLAA, FSR and TAA. Passes: tonemap composite -> camera motion vectors -> DLAA (NGX), FSR Native AA or TAA -> copy to final.
+// All three resolvers take the same inputs, so everything but the resolve is shared.
 // If the resolve fails for a frame, the copy falls back to the LDR scene.
 public sealed class DlaaRenderer : IDisposable
 {
 	private readonly Renderer _renderer;
+
+	private readonly string _name;
+
+	private readonly int _frameCount;
+
+	private readonly VkSampler _linearSampler;
+
+	private readonly ShaderReference[] _copyShaders;
+
+	private readonly ShaderReference[] _combineShaders;
+
+	private readonly IRenderPassInfo _finalPassInfo;
 
 	private readonly RenderTarget _sceneLdrTarget;
 
@@ -152,6 +164,16 @@ public sealed class DlaaRenderer : IDisposable
 
 	private readonly ScreenspaceRenderer? _combineLdr;
 
+	// TAA's buffers and final passes. Made the first time TAA runs, so DLAA and FSR users never allocate them.
+	private TaaResolver? _taa;
+
+	private ScreenspaceRenderer? _copyFromTaa;
+
+	private ScreenspaceRenderer? _combineTaa;
+
+	// The backend that resolved this frame, so the final pass shows its output.
+	private TemporalBackend _frameBackend = TemporalBackend.None;
+
 	private readonly IViewport _viewport;
 
 	private readonly bool _isMain;
@@ -180,6 +202,12 @@ public sealed class DlaaRenderer : IDisposable
 	public DlaaRenderer(Renderer renderer, IViewport viewport, string name, int frameCount, RenderImage offscreenDepth, RenderTarget offscreenTarget, IRenderPassInfo finalPassInfo, ShaderReference[] compositeShaders, VkPushConstantRange compositeRange, VkSampler pointSampler, VkSampler linearSampler, ShaderReference[] motionShaders, ShaderReference[] bodyShaders, ShaderReference[] copyShaders, ShaderReference[] combineShaders)
 	{
 		_renderer = renderer;
+		_name = name;
+		_frameCount = frameCount;
+		_linearSampler = linearSampler;
+		_copyShaders = copyShaders;
+		_combineShaders = combineShaders;
+		_finalPassInfo = finalPassInfo;
 		_viewport = viewport;
 		_isMain = viewport.IsMain();
 		Extent = offscreenTarget.Extent;
@@ -291,24 +319,32 @@ public sealed class DlaaRenderer : IDisposable
 
 		using (commandBuffer.TagRegion(Profiler.GpuTag.Cmaa2Blit))
 		{
-			// NGX writes the output as a storage image, so it has to be in the storage-write layout first.
-			commandBuffer.PipelineBarrier2(_output, ImageBarrierInfo.Presets.StorageWriteC);
-
-			// Adapter: the native command buffer handle. If the property name differs in your build, change only this line.
-			VkCommandBuffer nativeCommandBuffer = commandBuffer.Handle;
 			// The history starts over on the first frame, whenever the camera jumped (new followed object, mode switch, huge move),
-			// and when the player switches between DLAA and FSR.
+			// and when the player switches between DLAA, FSR and TAA.
 			bool jumped = _resetSeen != TaaCamera.ResetFrameNumber;
 			_resetSeen = TaaCamera.ResetFrameNumber;
 			bool switched = backend != _lastBackend;
 			_lastBackend = backend;
 			bool reset = _firstFrame || jumped || switched;
-			_dlaaFrameOk = backend == TemporalBackend.Fsr
-				? EvaluateFsr(commandBuffer, nativeCommandBuffer, width, height, jitterX, jitterY, reset)
-				: EvaluateDlss(nativeCommandBuffer, width, height, jitterX, jitterY, reset);
-			_firstFrame = false;
+			_frameBackend = backend;
+			if (backend == TemporalBackend.Taa)
+			{
+				_dlaaFrameOk = EvaluateTaa(commandBuffer, frameIndex, jitterX, jitterY, reset);
+			}
+			else
+			{
+				// NGX and FSR write the output as a storage image, so it has to be in the storage-write layout first.
+				commandBuffer.PipelineBarrier2(_output, ImageBarrierInfo.Presets.StorageWriteC);
 
-			commandBuffer.PipelineBarrier2(_output, ImageBarrierInfo.Presets.SampledReadC);
+				// Adapter: the native command buffer handle. If the property name differs in your build, change only this line.
+				VkCommandBuffer nativeCommandBuffer = commandBuffer.Handle;
+				_dlaaFrameOk = backend == TemporalBackend.Fsr
+					? EvaluateFsr(commandBuffer, nativeCommandBuffer, width, height, jitterX, jitterY, reset)
+					: EvaluateDlss(nativeCommandBuffer, width, height, jitterX, jitterY, reset);
+
+				commandBuffer.PipelineBarrier2(_output, ImageBarrierInfo.Presets.SampledReadC);
+			}
+			_firstFrame = false;
 		}
 
 		_linesDrawn = false;
@@ -404,19 +440,68 @@ public sealed class DlaaRenderer : IDisposable
 		return ok;
 	}
 
+	// TAA: New AA's own resolve (TaaResolver, TaaResolveFrag.frag). Its buffers are made the first time TAA runs at this size.
+	private bool EvaluateTaa(CommandBuffer commandBuffer, int frameIndex, float jitterX, float jitterY, bool reset)
+	{
+		if (_taa == null)
+		{
+			try
+			{
+				_taa = new TaaResolver(_renderer, _name, _frameCount, Extent, _linearSampler, _sceneLdrTarget.ColorImage.ImageView, _motionTarget.ColorImage.ImageView, _depthView);
+				_copyFromTaa = AaPasses.CreatePass(_renderer, _finalPassInfo, _copyShaders, 1, _frameCount, _linearSampler, AaPasses.PushRange(VkShaderStageFlags.FragmentBit), true);
+				_copyFromTaa.AddImage(_taa.OutputView, VkImageLayout.ShaderReadOnlyOptimal);
+				_copyFromTaa.Build();
+				if (_overlay != null)
+				{
+					_combineTaa = CreateCombine(_renderer, _finalPassInfo, _combineShaders, _frameCount, _linearSampler, _taa.OutputView);
+				}
+				TaaRuntime.Log("TAA running at " + Extent.Width + " x " + Extent.Height + ".");
+			}
+			catch (Exception ex)
+			{
+				DisposeTaa();
+				TaaRuntime.Disable("TAA could not be set up: " + ex.Message + ".");
+				return false;
+			}
+		}
+		_taa.Resolve(commandBuffer, frameIndex, jitterX, jitterY, reset);
+		return true;
+	}
+
+	private void DisposeTaa()
+	{
+		_combineTaa?.Dispose();
+		_copyFromTaa?.Dispose();
+		_taa?.Dispose();
+		_combineTaa = null;
+		_copyFromTaa = null;
+		_taa = null;
+	}
+
 	public void RenderFinalBlit(CommandBuffer commandBuffer, int frameIndex)
 	{
 		using (commandBuffer.TagRegion(Profiler.GpuTag.Cmaa2Blit))
 		{
-			ScreenspaceRenderer copy = _linesDrawn
-				? (_dlaaFrameOk ? _combineDlaa! : _combineLdr!)
-				: (_dlaaFrameOk ? _copyFromDlaa : _copyFromLdr);
+			ScreenspaceRenderer copy;
+			if (!_dlaaFrameOk)
+			{
+				copy = _linesDrawn ? _combineLdr! : _copyFromLdr;
+			}
+			else if (_frameBackend == TemporalBackend.Taa)
+			{
+				copy = _linesDrawn ? _combineTaa! : _copyFromTaa!;
+			}
+			else
+			{
+				copy = _linesDrawn ? _combineDlaa! : _copyFromDlaa;
+			}
 			copy.Render(commandBuffer, frameIndex, AaPasses.PushFor(Extent));
 		}
 	}
 
 	public void Dispose()
 	{
+		DisposeTaa();
 		_combineLdr?.Dispose();
 		_combineDlaa?.Dispose();
 		_overlay?.Dispose();
@@ -431,8 +516,7 @@ public sealed class DlaaRenderer : IDisposable
 	}
 }
 
-// Owns the DLAA/FSR renderers. Mirrors TaaState. Returns false from TryPrepare when the selected method can't run, so the original
-// path runs.
+// Owns the DLAA/FSR/TAA renderers. Returns false from TryPrepare when the selected method can't run, so the original path runs.
 internal static class DlaaState
 {
 	private static readonly Dictionary<int, DlaaRenderer> Renderers = new Dictionary<int, DlaaRenderer>();
@@ -462,9 +546,12 @@ internal static class DlaaState
 			return false;
 		}
 		Renderer renderer = Program.GetRenderer();
-		bool runtimeReady = backend == TemporalBackend.Fsr
-			? FsrRuntime.EnsureInitialized(renderer)
-			: DlaaRuntime.EnsureInitialized(renderer);
+		bool runtimeReady = backend switch
+		{
+			TemporalBackend.Fsr => FsrRuntime.EnsureInitialized(renderer),
+			TemporalBackend.Taa => TaaRuntime.IsReady,
+			_ => DlaaRuntime.EnsureInitialized(renderer)
+		};
 		if (!runtimeReady)
 		{
 			return false;
@@ -476,7 +563,7 @@ internal static class DlaaState
 		}
 		// The native plugin owns one DLSS feature. Running it for a second viewport (the game has a 128 x 128 one) made it tear down and
 		// rebuild the feature every frame, so nothing ever accumulated. Only the main viewport uses DLAA. Others take the game's own path.
-		// FSR keeps one context too, and only the main camera is jittered, so the same rule applies to it.
+		// FSR keeps one context too, and only the main camera is jittered, so the same rule applies to it and to TAA.
 		if (!viewport.IsMain())
 		{
 			return false;

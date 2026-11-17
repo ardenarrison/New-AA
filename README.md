@@ -1,6 +1,6 @@
-# New AA: FXAA, SMAA, DLAA and FSR anti-aliasing for Kitten Space Agency (StarMap)
+# New AA: FXAA, SMAA, TAA, DLAA and FSR anti-aliasing for Kitten Space Agency (StarMap)
 
-Adds FXAA, SMAA 1x (High preset), DLAA and FSR Native AA to Settings > Display > Anti-Aliasing. TAA is kept in the code but is switched off (`TaaAntiAliasing.Enabled = false`).
+Adds FXAA, SMAA 1x (High preset), TAA, DLAA and FSR Native AA to Settings > Display > Anti-Aliasing.
 Each runs after the game's tonemap composite, in place of its CMAA2 pass when selected.
 
 ## Install (Windows)
@@ -15,10 +15,10 @@ Download `newaa-1.1.0.zip` from the Releases page. It contains the built mod, so
        id = "newaa"
        enabled = true
 
-4. Start the game through `StarMap.exe`, then pick **DLAA**, **FSR Native AA**, **SMAA** or **FXAA** under Settings > Display > Anti-Aliasing.
+4. Start the game through `StarMap.exe`, then pick **DLAA**, **FSR Native AA**, **TAA**, **SMAA** or **FXAA** under Settings > Display > Anti-Aliasing.
 
 DLAA needs an NVIDIA RTX GPU (RTX 20-series or newer) and a current driver. FSR Native AA works on NVIDIA, AMD and Intel GPUs that AMD's
-FSR runtime supports. SMAA and FXAA work on any GPU.
+FSR runtime supports. TAA, SMAA and FXAA work on any GPU.
 
 ### Powered by NVIDIA DLSS
 DLAA in New AA uses **NVIDIA DLSS** (via the NVIDIA NGX SDK). NVIDIA, DLSS and RTX are trademarks of NVIDIA Corporation. New AA is a free community mod and is not affiliated with or endorsed by NVIDIA or by the game's developers.
@@ -36,7 +36,7 @@ AMD, FidelityFX, FSR and Radeon are trademarks of Advanced Micro Devices, Inc. N
     python deploy.py    install it into the game and enable it
 
 Then start the game through StarMap. Details, options and requirements are in `BUILD.md`. DLAA needs an NVIDIA RTX GPU (20-series or newer),
-and building it needs NVIDIA's DLSS SDK, which you download yourself (see `BUILD.md`). FSR, SMAA and FXAA do not need it. AMD's FSR
+and building it needs NVIDIA's DLSS SDK, which you download yourself (see `BUILD.md`). FSR, TAA, SMAA and FXAA do not need it. AMD's FSR
 runtime is downloaded by `setup.py` / `build.py` from AMD's repository at a fixed release and checked against pinned SHA-256 hashes.
 Third-party code and licenses are listed in `THIRD_PARTY_NOTICES.md`.
 
@@ -54,13 +54,13 @@ Third-party code and licenses are listed in `THIRD_PARTY_NOTICES.md`.
       SmaaRenderer.cs       SMAA passes and per-viewport state
       AaPasses.cs           helpers shared by the renderers
       FxaaData.cs           push-constant block shared by FXAA and SMAA
-      TaaRenderer.cs        TAA resolve (switched off)
+      TaaRenderer.cs        TAA menu entry and resolve (TaaResolver)
       TaaCamera.cs          camera jitter, jump detection, motion data (Harmony patches on Camera.OnFrame and Program)
       DlaaRenderer.cs       DLAA passes, NGX start-up and per-frame state
       DlaaBodies.cs         per-object motion vectors
       DlaaLines.cs          orbit-line overlay
       DlaaDeviceExtensions.cs, DlaaSupport.cs, DlaaNative.cs   Vulkan extensions, GPU check, native plugin imports
-      TemporalAa.cs         which temporal method (DLAA or FSR) is selected and ready
+      TemporalAa.cs         which temporal method (DLAA, FSR or TAA) is selected and ready
       FsrRuntime.cs         FSR menu entry, runtime start-up, the upscaler context (FsrUpscaler)
       FsrNative.cs          bindings for AMD's FSR API (FsrNative, FsrApi)
       FsrDeviceFeatures.cs  Vulkan features and extensions FSR needs, added at device creation
@@ -69,12 +69,12 @@ Third-party code and licenses are listed in `THIRD_PARTY_NOTICES.md`.
 
 ## How it hooks in
 
-- `GameSettings.GetAvailableAntiAliasingMethods` (postfix) adds FXAA, SMAA, DLAA and FSR Native AA to the dropdown.
+- `GameSettings.GetAvailableAntiAliasingMethods` (postfix) adds FXAA, SMAA, TAA, DLAA and FSR Native AA to the dropdown.
 - `AntiAliasingNames.Register` adds the extra values and labels to the game's `EnumCollections.AntiAliasingMethods` tables, so the dropdown never draws a null label.
 - `Program.RenderAaPreparePasses` (prefix) runs the composite and the anti-aliasing passes.
 - `Program.RenderFinalComposite` (prefix) runs the final blend pass.
 
-Each prefix checks the selected option. If the option isn't FXAA or SMAA, or its resources are missing,
+Each prefix checks the selected option. If the option isn't one of New AA's, or it cannot run,
 the original code runs. The prepare and final prefixes make the same decision, so they always agree.
 
 ## DLAA
@@ -124,14 +124,27 @@ Only the resolve step differs: `DlaaRenderer.EvaluateFsr` calls FSR where DLAA c
   longer be using it. Switching between DLAA and FSR restarts the temporal history.
 - Every FSR result change is logged with the prefix `[FSR]`, as are the runtime's own warnings (at most 40 per session).
 
-## TAA notes (disabled)
+## TAA
 
-- The camera's projection gets a Halton(2,3) sub-pixel jitter each frame. The jitter is applied only to the matrix used for rendering.
-- Reprojection uses the depth buffer and the previous frame's unjittered view-projection. History is clamped to the 3x3 neighborhood in YCoCg.
-- Limitation: reprojection assumes the scene is static relative to the camera. Moving objects and the vehicle moving through the world will
-  ghost. The clamp keeps this from getting worse, but it can make the image look soft while moving.
-- Matrix layout: the shader assumes the engine stores matrices row-major, so GLSL multiplies them as column vectors. If TAA looks distorted or
-  shifted from the first frame, that assumption is the first thing to check.
+TAA is New AA's own temporal anti-aliasing. It runs through the DLAA pipeline like FSR Native AA: the same jittered camera, camera
+and per-object motion vectors, camera-jump resets, orbit-line overlay and main-viewport-only rule. Only the resolve is its own. It
+needs no runtime or SDK and works on any GPU.
+
+- `TaaResolver` (`TaaRenderer.cs`) records three passes after the motion vectors: the resolve (`TaaResolveFrag.frag`), a light
+  sharpen into the image the final pass shows (`TaaSharpenFrag.frag`), and a pass that keeps the nearest depth around each pixel
+  for the next frame (`TaaDepthFrag.frag`). Its buffers (two 16-bit float history buffers, the output and the kept depth) are made
+  the first time TAA runs, so DLAA and FSR users never allocate them.
+- The resolve, per pixel: rebuilds this frame's colour at the pixel centre from the 3x3 neighbourhood, weighting each sample by its
+  distance once the jitter is taken out; takes the motion vector of the closest surface in the 3x3 neighbourhood; reads the history
+  there with a 5-tap Catmull-Rom filter; clips it to this frame's colours around the pixel (a YCoCg variance box inside the min/max
+  box); then blends. After a reset it averages the frames so far (the history's alpha counts them), then takes 10% of each new frame,
+  up to 25% for fast motion.
+- Stars: dim stars are smaller than a pixel and fall between the samples in some frames of the jitter cycle, where clipping would
+  erase them. A still pixel with only sky around it this frame and last (depth 0 in its 3x3 neighbourhood both times), whose history
+  differs from this frame only in a spot a couple of pixels wide, keeps its history unclipped. Engine plumes and smoke write no depth
+  either, but they leave a larger area when they move, so they are still clipped.
+- Limits: geometry thinner than a pixel (distant antennas, thin struts) can look broken up or flicker, as with most TAA. The image is
+  a little softer than DLAA or FSR Native AA.
 
 ## License
 

@@ -2,7 +2,7 @@
 id = "newaa"
 name = "newaa"
 version = "1.1.0"
-description = "Adds FXAA, SMAA, DLAA (NVIDIA RTX) and FSR Native AA as Anti-Aliasing options."
+description = "Adds FXAA, SMAA, TAA, DLAA (NVIDIA RTX) and FSR Native AA as Anti-Aliasing options."
 
 # The game's content loader only registers assets declared in these XML files.
 assets = [

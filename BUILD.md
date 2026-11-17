@@ -11,7 +11,7 @@ Windows only. Python 3.8+ (standard library only). Three scripts do everything:
 - **Kitten Space Agency**, installed (default `C:\Program Files\Kitten Space Agency\`)
 - **StarMap**, to play with the mod (not to build it): https://github.com/StarMapLoader/StarMap
 - An **NVIDIA RTX GPU (RTX 20-series or newer)** to run DLAA. FSR Native AA runs on NVIDIA, AMD and Intel GPUs that AMD's FSR
-  runtime supports. SMAA and FXAA work on any GPU.
+  runtime supports. TAA, SMAA and FXAA work on any GPU.
 - Only to rebuild the native plugin (`build.py --native`): Visual Studio with the C++ workload, and the Vulkan SDK (headers only).
 
 - **NVIDIA's DLSS SDK**, for DLAA: download it from https://github.com/NVIDIA/DLSS and put it in a `DLSS_SDK\` folder in this
@@ -22,7 +22,7 @@ Windows only. Python 3.8+ (standard library only). Three scripts do everything:
       DLSS_SDK\lib\Windows_x86_64\x64\nvsdk_ngx_d.lib     static library (to rebuild the native plugin)
       DLSS_SDK\lib\Windows_x86_64\rel\nvngx_dlss.dll      the DLSS runtime, copied into the mod
 
-  FSR, SMAA and FXAA do not need the SDK.
+  FSR, TAA, SMAA and FXAA do not need the SDK.
 
 - **AMD's FSR runtime**, for FSR Native AA: `setup.py` (after asking) and `build.py` download AMD's two signed Vulkan DLLs into
   `FSR_SDK\` from the FSR SDK repository at tag `v2.4.0`, and check each against a pinned SHA-256 hash in `newaa_common.py`:
@@ -73,7 +73,7 @@ the mod folder matches the package afterwards. The game loads a mod only if it i
 Close the game and StarMap first. They keep the DLLs locked, and deploy refuses to run while they are open (`--force` overrides).
 
 ## Playing
-Start the game through `StarMap.exe`, then pick **DLAA**, **FSR Native AA**, **SMAA** or **FXAA** under Settings > Display > Anti-Aliasing.
+Start the game through `StarMap.exe`, then pick **DLAA**, **FSR Native AA**, **TAA**, **SMAA** or **FXAA** under Settings > Display > Anti-Aliasing.
 Switching between MSAA and the other methods asks for a restart, because MSAA changes the render targets at startup.
 
 ## Plain dotnet
