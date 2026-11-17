@@ -46,7 +46,8 @@ SOFTWARE.
 ## NVIDIA DLSS / NGX SDK (not included in this repository)
 
 - Used by: `Native/newaa_ngx.cpp`, which is compiled against the SDK's headers and linked with its static library
-  (`nvsdk_ngx_d.lib`) to produce `NewAANgx.dll`. The DLSS runtime `nvngx_dlss.dll` is loaded from the mod folder.
+  (`nvsdk_ngx_d.lib` on Windows, `libnvsdk_ngx.a` on Linux) to produce `NewAANgx.dll` and `libNewAANgx.so`. The DLSS runtime
+  (`nvngx_dlss.dll` on Windows, `libnvidia-ngx-dlss.so.<version>` on Linux) is loaded from the mod folder.
 - Source: https://github.com/NVIDIA/DLSS (the version used in development is DLSS 310.9.1).
 - The SDK is licensed by NVIDIA under the NVIDIA RTX SDKs license, which is in the SDK's `LICENSE.txt`. That license does not
   allow the SDK to be redistributed as a stand-alone product, so this repository does not contain it. Download it yourself and
@@ -54,7 +55,8 @@ SOFTWARE.
   must meet the distribution requirements in that license.
 - NVIDIA did not issue New AA an application ID, so it starts NGX with its own project ID (a GUID in `Source/DlaaRenderer.cs`) and
   the CUSTOM engine type, which is what the SDK headers prescribe for that case.
-- Release builds of New AA ship `nvngx_dlss.dll` and `NewAANgx.dll` (which contains NVIDIA NGX code) together with NVIDIA's license text.
+- Release builds of New AA ship `nvngx_dlss.dll` and `NewAANgx.dll` (Windows) or `libnvidia-ngx-dlss.so.<version>` and
+  `libNewAANgx.so` (Linux), which contain NVIDIA NGX code, together with NVIDIA's license text.
   Using those files is subject to NVIDIA's license: among other things, you may not reverse engineer or decompile them, remove their
   notices, or redistribute them as a stand-alone product, and DLSS is licensed only for use on systems with NVIDIA GPUs. NVIDIA may
   also update the DLSS runtime over the air.
@@ -69,7 +71,16 @@ SOFTWARE.
   download them into `FSR_SDK/` (not stored in the repository because of their size) and check them against pinned SHA-256 hashes.
 - License: the SDK's `docs/license.md` lists these DLLs and headers under the MIT license, Copyright (C) Advanced Micro Devices, Inc. The
   full text is in `ThirdParty/AMD_FSR_SDK_LICENSE.txt`, which the build copies next to the DLLs.
+- Windows only: AMD ships these DLLs for Windows, so the Linux build of New AA has no FSR files.
 - AMD, FidelityFX, FSR and Radeon are trademarks of Advanced Micro Devices, Inc. New AA is not affiliated with or endorsed by AMD.
+
+## GCC runtime libraries and glibc (Linux build only)
+
+- Used in: `libNewAANgx.so`, which links GCC 9's `libstdc++` and `libgcc` statically (from Ubuntu 20.04's `libstdc++-9-dev` and
+  `libgcc-9-dev` packages, which `Native/make_linux_sysroot.sh` downloads), with their symbols hidden. NVIDIA's `libnvsdk_ngx.a` needs
+  libstdc++. Like every Linux shared library, it also contains glibc's small start-up objects and `libc_nonshared.a`.
+- License: libstdc++ and libgcc are GPL 3 with the GCC Runtime Library Exception 3.1, which allows shipping programs built with them
+  under any terms. glibc's objects are LGPL 2.1 with its exception for linking them into programs. Neither is in this repository.
 
 ## Harmony
 

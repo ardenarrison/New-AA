@@ -1,6 +1,7 @@
 # Building and installing the New AA mod
 
-Windows only. Python 3.8+ (standard library only). Three scripts do everything:
+The scripts run on Windows. They build the Windows mod and, with `build.py --linux`, the experimental Linux one. Python 3.8+
+(standard library only). Three scripts do everything:
 
     python setup.py      check the machine, restore packages, save the game paths      (once per PC)
     python build.py      build the mod and assemble Package\
@@ -13,16 +14,25 @@ Windows only. Python 3.8+ (standard library only). Three scripts do everything:
 - An **NVIDIA RTX GPU (RTX 20-series or newer)** to run DLAA. FSR Native AA runs on NVIDIA, AMD and Intel GPUs that AMD's FSR
   runtime supports. TAA, SMAA and FXAA work on any GPU.
 - Only to rebuild the native plugin (`build.py --native`): Visual Studio with the C++ workload, and the Vulkan SDK (headers only).
+- Only for the Linux build (`build.py --linux`): LLVM with `clang++` and `ld.lld` (https://github.com/llvm/llvm-project/releases),
+  the Vulkan SDK headers, and a Linux sysroot that `Native\make_linux_sysroot.sh` makes (once, in WSL or on Ubuntu or Debian):
+
+      bash Native/make_linux_sysroot.sh /mnt/c/Users/<you>/newaa-sysroot
+
+  Pass it with `--linux-sysroot C:\Users\<you>\newaa-sysroot` or set `NEWAA_LINUX_SYSROOT`. It is glibc 2.31 and GCC 9's libstdc++
+  from Ubuntu 20.04, downloaded by apt and checked against the Ubuntu archive's signatures. No root is needed.
 
 - **NVIDIA's DLSS SDK**, for DLAA: download it from https://github.com/NVIDIA/DLSS and put it in a `DLSS_SDK\` folder in this
-  project. NVIDIA's license does not allow redistributing the SDK, so it is not stored in the repository. Only three paths are
+  project. NVIDIA's license does not allow redistributing the SDK, so it is not stored in the repository. Only these paths are
   used, so a trimmed copy is enough:
 
-      DLSS_SDK\include\                                   NGX headers (to rebuild the native plugin)
-      DLSS_SDK\lib\Windows_x86_64\x64\nvsdk_ngx_d.lib     static library (to rebuild the native plugin)
-      DLSS_SDK\lib\Windows_x86_64\rel\nvngx_dlss.dll      the DLSS runtime, copied into the mod
+      DLSS_SDK\include\                                   NGX headers (to rebuild the native plugins)
+      DLSS_SDK\lib\Windows_x86_64\x64\nvsdk_ngx_d.lib     static library (to rebuild NewAANgx.dll)
+      DLSS_SDK\lib\Windows_x86_64\rel\nvngx_dlss.dll      the DLSS runtime, copied into the Windows mod
+      DLSS_SDK\lib\Linux_x86_64\libnvsdk_ngx.a            static library (to rebuild libNewAANgx.so)
+      DLSS_SDK\lib\Linux_x86_64\rel\libnvidia-ngx-dlss.so.<version>    the DLSS runtime, copied into the Linux mod
 
-  FSR, TAA, SMAA and FXAA do not need the SDK.
+  Use the same SDK version for both (New AA uses 310.9.1). FSR, TAA, SMAA and FXAA do not need the SDK.
 
 - **AMD's FSR runtime**, for FSR Native AA: `setup.py` (after asking) and `build.py` download AMD's two signed Vulkan DLLs into
   `FSR_SDK\` from the FSR SDK repository at tag `v2.4.0`, and check each against a pinned SHA-256 hash in `newaa_common.py`:
@@ -46,12 +56,20 @@ checks the DLSS SDK and the native plugin, reports your GPU, runs `dotnet restor
 ## build.py
     python build.py             build the C# mod, then assemble Package\
     python build.py --native    also rebuild Native\NewAANgx.dll
+    python build.py --linux     also assemble Package-linux\ (with --native, also rebuild Native\libNewAANgx.so)
     python build.py --clean     delete bin\ and obj\ first
 
 `Package\` is a complete, drop-in mod folder:
 
     mod.toml  newaa.dll  NewAAAssets.xml  NewAANgx.dll  nvngx_dlss.dll  Shaders\  Textures\
     amd_fidelityfx_loader_vk.dll  amd_fidelityfx_upscaler_vk.dll  AMD_FSR_SDK_LICENSE.txt
+
+`Package-linux\` is the experimental Linux mod folder. It has the same `newaa.dll` and content, the Linux plugin and NVIDIA's Linux
+DLSS runtime, and no FSR files (AMD ships its FSR runtime for Windows only):
+
+    mod.toml  newaa.dll  NewAAAssets.xml  libNewAANgx.so  libnvidia-ngx-dlss.so.<version>  Shaders\  Textures\
+
+`build.py --linux` builds `Native\libNewAANgx.so` when it is missing. `deploy.py` installs the Windows package only.
 
 The build checks that every shader and texture named in `mod.toml` and `NewAAAssets.xml` is in the package. It never touches the
 game folders (it builds with `-p:DeployMod=false`).
@@ -82,11 +100,11 @@ Switching between MSAA and the other methods asks for a restart, because MSAA ch
 It does not touch `manifest.toml`.
 
 ## Publishing
-The repository does not contain `DLSS_SDK\`, the DLSS runtime DLLs, the built `Native\NewAANgx.dll` or the downloaded `FSR_SDK\`
-(see `.gitignore`). A release zip made from `Package\` already includes AMD's FSR DLLs and their license text.
+The repository does not contain `DLSS_SDK\`, the DLSS runtimes, the built `Native\NewAANgx.dll` and `Native\libNewAANgx.so` or the
+downloaded `FSR_SDK\` (see `.gitignore`). A release zip made from `Package\` already includes AMD's FSR DLLs and their license text.
 Before you publish a build, read NVIDIA's license in the SDK's `LICENSE.txt` (summarised in `THIRD_PARTY_NOTICES.md`).
-The built plugin and `Source\DlaaRenderer.cs` must stay in step: `NewAA_NgxInit` takes the project ID and engine version, so rebuild
-the plugin (`python build.py --native`) whenever its signature changes.
+The built plugins and `Source\DlaaRenderer.cs` must stay in step: `NewAA_NgxInit` takes the project ID and engine version, so rebuild
+the plugins (`python build.py --native --linux`) whenever its signature changes.
 
 ## Files and where they come from
 - `Source\` the C# mod. `Content\` the shaders, textures and `NewAAAssets.xml`. `mod.toml` is the StarMap/KSA manifest.

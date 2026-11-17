@@ -24,6 +24,9 @@ public static class FsrAntiAliasing
 	public static readonly GameSettings.AntiAliasing Method = (GameSettings.AntiAliasing)EnumValue;
 
 	public static bool IsSelected => GameSettings.Current.AntiAliasingMethod == Method;
+
+	// AMD ships the FSR runtime (amd_fidelityfx_*_vk.dll) for Windows only, so FSR Native AA is not offered anywhere else.
+	public static bool RuntimeExistsForThisSystem => OperatingSystem.IsWindows();
 }
 
 // Loads AMD's FSR runtime once, the first time FSR is selected. Keeps FSR off if anything fails, so the game falls back to no
@@ -54,6 +57,13 @@ internal static unsafe class FsrRuntime
 			return _ready;
 		}
 		_attempted = true;
+
+		if (!FsrAntiAliasing.RuntimeExistsForThisSystem)
+		{
+			// Only reached when FSR is still selected from a settings file written on Windows.
+			Log("AMD's FSR runtime exists for Windows only, so FSR Native AA is not available on this system. Using no anti aliasing.");
+			return false;
+		}
 
 		string modFolder = Path.GetDirectoryName(typeof(FsrRuntime).Assembly.Location) ?? string.Empty;
 		string loaderPath = Path.Combine(modFolder, FsrNative.LoaderDll);

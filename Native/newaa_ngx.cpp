@@ -32,29 +32,100 @@ static void NVSDK_CONV NgxLogCallback(const char* message, NVSDK_NGX_Logging_Lev
     }
 }
 
-static void OpenNgxLog(const wchar_t* dataPath)
-{
 #ifdef _WIN32
-    std::wstring logPath = std::wstring(dataPath) + L"\\ngx_log.txt";
-    g_ngxLog = _wfopen(logPath.c_str(), L"a");
-#else
-    (void)dataPath;
-#endif
+// The paths arrive as wchar_t, which is what NGX takes.
+static std::wstring ToNgxPath(const NewAA_PathChar* path)
+{
+    return path != nullptr ? std::wstring(path) : std::wstring();
 }
+
+static void OpenNgxLog(const NewAA_PathChar* dataPath)
+{
+    std::wstring logPath = ToNgxPath(dataPath) + L"\\ngx_log.txt";
+    g_ngxLog = _wfopen(logPath.c_str(), L"a");
+}
+#else
+// Code points of a UTF-16 string. An unpaired surrogate is kept as it is.
+template <typename Emit>
+static void ForEachCodePoint(const char16_t* text, Emit emit)
+{
+    for (size_t i = 0; text != nullptr && text[i] != 0; ++i)
+    {
+        uint32_t c = text[i];
+        if (c >= 0xD800 && c < 0xDC00 && text[i + 1] >= 0xDC00 && text[i + 1] < 0xE000)
+        {
+            c = 0x10000 + ((c - 0xD800) << 10) + (uint32_t)(text[i + 1] - 0xDC00);
+            ++i;
+        }
+        emit(c);
+    }
+}
+
+// NGX takes wchar_t paths, which are UTF-32 here.
+static std::wstring ToNgxPath(const NewAA_PathChar* path)
+{
+    std::wstring result;
+    ForEachCodePoint(path, [&](uint32_t c) { result.push_back((wchar_t)c); });
+    return result;
+}
+
+// File names for fopen are UTF-8.
+static std::string ToUtf8(const NewAA_PathChar* path)
+{
+    std::string result;
+    ForEachCodePoint(path, [&](uint32_t c) {
+        if (c < 0x80)
+        {
+            result.push_back((char)c);
+        }
+        else if (c < 0x800)
+        {
+            result.push_back((char)(0xC0 | (c >> 6)));
+            result.push_back((char)(0x80 | (c & 0x3F)));
+        }
+        else if (c < 0x10000)
+        {
+            result.push_back((char)(0xE0 | (c >> 12)));
+            result.push_back((char)(0x80 | ((c >> 6) & 0x3F)));
+            result.push_back((char)(0x80 | (c & 0x3F)));
+        }
+        else
+        {
+            result.push_back((char)(0xF0 | (c >> 18)));
+            result.push_back((char)(0x80 | ((c >> 12) & 0x3F)));
+            result.push_back((char)(0x80 | ((c >> 6) & 0x3F)));
+            result.push_back((char)(0x80 | (c & 0x3F)));
+        }
+    });
+    return result;
+}
+
+static void OpenNgxLog(const NewAA_PathChar* dataPath)
+{
+    std::string logPath = ToUtf8(dataPath) + "/ngx_log.txt";
+    g_ngxLog = std::fopen(logPath.c_str(), "a");
+}
+#endif
 
 static void LogLine(const char* text)
 {
     std::fprintf(stderr, "[NewAA DLAA] %s\n", text);
 }
 
-NEWAA_API int NewAA_NgxInit(const char* projectId, const char* engineVersion, const wchar_t* applicationDataPath, const wchar_t* featureSearchPath, VkInstance instance, VkPhysicalDevice physicalDevice, VkDevice device, PFN_vkGetInstanceProcAddr getInstanceProcAddr)
+NEWAA_API int NewAA_NgxInit(const char* projectId, const char* engineVersion, const NewAA_PathChar* applicationDataPath, const NewAA_PathChar* featureSearchPath, VkInstance instance, VkPhysicalDevice physicalDevice, VkDevice device, PFN_vkGetInstanceProcAddr getInstanceProcAddr)
 {
     g_device = device;
     OpenNgxLog(applicationDataPath);
 
-    // Feature info: where NGX looks for nvngx_dlss.dll, and where it writes its messages.
+    // NGX's own copies of the paths, kept for the whole session (the caller's strings are freed when this returns).
+    static std::wstring dataPath;
+    static std::wstring searchPath;
+    dataPath = ToNgxPath(applicationDataPath);
+    searchPath = ToNgxPath(featureSearchPath);
+
+    // Feature info: where NGX looks for the DLSS runtime, and where it writes its messages.
     static const wchar_t* searchPaths[1];
-    searchPaths[0] = featureSearchPath;
+    searchPaths[0] = searchPath.c_str();
     static NVSDK_NGX_FeatureCommonInfo featureInfo;
     std::memset(&featureInfo, 0, sizeof(featureInfo));
     featureInfo.PathListInfo.Path = searchPaths;
@@ -92,7 +163,7 @@ NEWAA_API int NewAA_NgxInit(const char* projectId, const char* engineVersion, co
     }
 
     // No NVIDIA-issued application ID, so identify the project with our own GUID and the CUSTOM engine type.
-    NVSDK_NGX_Result result = NVSDK_NGX_VULKAN_Init_with_ProjectID(projectId, NVSDK_NGX_ENGINE_TYPE_CUSTOM, engineVersion, applicationDataPath, instance, physicalDevice, device, getInstanceProcAddr, getDeviceProcAddr, &featureInfo, NVSDK_NGX_Version_API);
+    NVSDK_NGX_Result result = NVSDK_NGX_VULKAN_Init_with_ProjectID(projectId, NVSDK_NGX_ENGINE_TYPE_CUSTOM, engineVersion, dataPath.c_str(), instance, physicalDevice, device, getInstanceProcAddr, getDeviceProcAddr, &featureInfo, NVSDK_NGX_Version_API);
     if (NVSDK_NGX_FAILED(result))
     {
         LogLine("NVSDK_NGX_VULKAN_Init_with_ProjectID failed");
