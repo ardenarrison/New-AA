@@ -6,11 +6,15 @@ using Brutal.VulkanApi;
 
 namespace KSA.Mods.NewAA;
 
-// P/Invoke bindings for NewAANgx.dll (Native\newaa_ngx.cpp). The DLL is loaded from the mod folder by path,
-// so it does not have to be on the system search path.
+// P/Invoke bindings for the DLAA plugin (Native/newaa_ngx.cpp). It is loaded from the mod folder by path, so it does not have to
+// be on the system search path.
 internal static class DlaaNative
 {
 	private const string LibraryName = "NewAANgx";
+
+	// The plugin's file in the mod folder, or null on a system it is not built for.
+	public static string? PluginFileName =>
+		OperatingSystem.IsWindows() ? "NewAANgx.dll" : OperatingSystem.IsLinux() ? "libNewAANgx.so" : null;
 
 	// NVSDK_NGX_Result_Success in nvsdk_ngx_defs.h. NGX uses 0x1 for success, not 0.
 	public const int NgxSuccess = 0x1;

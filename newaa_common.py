@@ -1,6 +1,7 @@
 """Shared helpers for setup.py, build.py and deploy.py. Not meant to be run directly.
 
-Windows only (the game, the DLSS runtime and the MSVC toolchain are Windows only). Standard library only.
+The scripts run on Windows. build.py --linux also cross-compiles the experimental Linux plugin there, with LLVM and a Linux
+sysroot (Native/make_linux_sysroot.sh). Standard library only.
 """
 from __future__ import annotations
 
@@ -31,6 +32,13 @@ SDK_INCLUDE = SDK_DIR / "include"
 SDK_LIB = SDK_DIR / "lib" / "Windows_x86_64" / "x64" / "nvsdk_ngx_d.lib"
 DLSS_RUNTIME = SDK_DIR / "lib" / "Windows_x86_64" / "rel" / "nvngx_dlss.dll"
 BUILT_DLL = ROOT / "bin" / "Release" / "net10.0" / "newaa.dll"
+# The experimental Linux build: the same newaa.dll, the plugin built for Linux, and NVIDIA's Linux DLSS runtime. No FSR, because
+# AMD ships its FSR runtime for Windows only.
+PACKAGE_LINUX_DIR = ROOT / "Package-linux"
+NATIVE_SO = NATIVE_DIR / "libNewAANgx.so"
+SDK_LIB_LINUX = SDK_DIR / "lib" / "Linux_x86_64" / "libnvsdk_ngx.a"
+DLSS_RUNTIME_LINUX_DIR = SDK_DIR / "lib" / "Linux_x86_64" / "rel"
+LINUX_SYSROOT_ENV = "NEWAA_LINUX_SYSROOT"
 # AMD's FSR runtime for FSR Native AA: the two signed Vulkan DLLs from the FSR SDK. They are MIT licensed and may be shipped, but at
 # 36 MB they are downloaded from AMD's repository at a fixed release (not stored in this one) and checked against these hashes.
 FSR_DIR = ROOT / "FSR_SDK"
@@ -332,6 +340,44 @@ def find_vulkan_include() -> Optional[Path]:
             if (version / "Include" / "vulkan" / "vulkan.h").is_file():
                 return version / "Include"
     return None
+
+
+def find_clang() -> Optional[Path]:
+    """LLVM's clang++, which cross-compiles the Linux plugin (it has to come with ld.lld, which LLVM's installer includes)."""
+    found = shutil.which("clang++")
+    candidates = [Path(found)] if found else []
+    for variable in ("ProgramFiles", "ProgramW6432"):
+        base = os.environ.get(variable)
+        if base:
+            candidates.append(Path(base) / "LLVM" / "bin" / "clang++.exe")
+    for candidate in candidates:
+        if candidate.is_file() and (candidate.parent / ("ld.lld.exe" if os.name == "nt" else "ld.lld")).is_file():
+            return candidate
+    return None
+
+
+def is_linux_sysroot(path: Path) -> bool:
+    """A sysroot from Native/make_linux_sysroot.sh: glibc, and GCC's static libstdc++."""
+    return ((path / "usr" / "include" / "stdio.h").is_file()
+            and (path / "usr" / "lib" / "x86_64-linux-gnu" / "libc.so").is_file()
+            and any((path / "usr" / "lib" / "gcc" / "x86_64-linux-gnu").glob("*/libstdc++.a")))
+
+
+def resolve_linux_sysroot(cli_value: Optional[str], config: dict) -> Optional[Path]:
+    """--linux-sysroot, then NEWAA_LINUX_SYSROOT, then the saved config."""
+    for value in (cli_value, os.environ.get(LINUX_SYSROOT_ENV), config.get("linux_sysroot")):
+        if value:
+            return Path(value.strip('"'))
+    return None
+
+
+def dlss_runtime_linux() -> Optional[Path]:
+    """NVIDIA's Linux DLSS runtime, libnvidia-ngx-dlss.so.<version>, from the DLSS SDK (the newest one there)."""
+    if not DLSS_RUNTIME_LINUX_DIR.is_dir():
+        return None
+    found = sorted(DLSS_RUNTIME_LINUX_DIR.glob("libnvidia-ngx-dlss.so.*"),
+                   key=lambda p: [int(part) if part.isdigit() else 0 for part in p.name.split(".so.")[-1].split(".")])
+    return found[-1] if found else None
 
 
 # --------------------------------------------------------------------------------------------------

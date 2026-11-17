@@ -128,7 +128,8 @@ internal static class FxaaState
 	}
 }
 
-// Adds FXAA, SMAA, TAA, DLAA and FSR Native AA to the list of options the Anti-Aliasing dropdown shows.
+// Adds FXAA, SMAA, TAA, DLAA and FSR Native AA to the list of options the Anti-Aliasing dropdown shows. FSR Native AA only where
+// AMD's FSR runtime exists (Windows).
 [HarmonyPatch(typeof(GameSettings), nameof(GameSettings.GetAvailableAntiAliasingMethods))]
 internal static class AvailableAntiAliasingMethodsPatch
 {
@@ -137,6 +138,10 @@ internal static class AvailableAntiAliasingMethodsPatch
 		List<GameSettings.AntiAliasing> methods = new List<GameSettings.AntiAliasing>(__result.ToArray());
 		foreach (GameSettings.AntiAliasing extra in new[] { FxaaAntiAliasing.Method, SmaaAntiAliasing.Method, TaaAntiAliasing.Method, DlaaAntiAliasing.Method, FsrAntiAliasing.Method })
 		{
+			if (extra == FsrAntiAliasing.Method && !FsrAntiAliasing.RuntimeExistsForThisSystem)
+			{
+				continue;
+			}
 			if (!methods.Contains(extra))
 			{
 				methods.Add(extra);

@@ -38,7 +38,7 @@ internal static class DlaaRuntime
 {
 	// NGX project ID for New AA (a GUID, as NVIDIA's SDK asks for when no application ID was issued) and the version sent with it.
 	private const string ProjectId = "968cb9ed-5fa2-420d-b5c6-52ce9254da73";
-	private const string EngineVersion = "1.1.0";
+	private const string EngineVersion = "1.2.0";
 
 	private static bool _attempted;
 
@@ -59,15 +59,22 @@ internal static class DlaaRuntime
 			return false;
 		}
 
+		string? pluginName = DlaaNative.PluginFileName;
+		if (pluginName == null)
+		{
+			Log("DLAA is built for Windows and Linux only. Using no anti aliasing.");
+			return false;
+		}
 		string modFolder = Path.GetDirectoryName(typeof(DlaaRuntime).Assembly.Location) ?? string.Empty;
-		string dllPath = Path.Combine(modFolder, "NewAANgx.dll");
+		string dllPath = Path.Combine(modFolder, pluginName);
 		if (!File.Exists(dllPath))
 		{
-			Log("NewAANgx.dll not found in the mod folder. DLAA disabled, using no anti aliasing.");
+			Log(pluginName + " not found in the mod folder. DLAA disabled, using no anti aliasing.");
 			return false;
 		}
 
-		string dataPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "My Games", "Kitten Space Agency", "NewAA", "ngx");
+		// In the game's profile folder, which StarMap moves into the instance folder when Borea starts the game.
+		string dataPath = Path.Combine(KSA.Constants.DocumentsFolderPath, "NewAA", "ngx");
 		Directory.CreateDirectory(dataPath);
 
 		try
@@ -78,7 +85,7 @@ internal static class DlaaRuntime
 			VkPhysicalDevice physicalDevice = renderer.PhysicalDevice;
 			VkDevice device = renderer.Device.Handle;
 
-			int initResult = DlaaNative.NewAA_NgxInit(ProjectId, EngineVersion, dataPath, modFolder, instance, physicalDevice, device, EngineGetInstanceProcAddr());
+			int initResult = DlaaNative.NewAA_NgxInit(ProjectId, EngineVersion, dataPath, NgxSearchFolder(modFolder), instance, physicalDevice, device, EngineGetInstanceProcAddr());
 			Log("NGX messages are written to " + Path.Combine(dataPath, "ngx_log.txt"));
 			if (initResult != DlaaNative.NgxSuccess)
 			{
@@ -100,6 +107,71 @@ internal static class DlaaRuntime
 			_ready = false;
 		}
 		return _ready;
+	}
+
+	// The folder NGX searches for the DLSS runtime. NGX on Linux turns its paths into file names in the "C" locale, so it cannot open
+	// a file whose path has a non-ASCII character (a localized Documents folder such as ~/Документы): it searches '' instead and DLAA
+	// is unavailable. It also resolves symbolic links before it opens the runtime, so a link does not help. For such a mod folder the
+	// runtime is copied to a folder with an ASCII path (again only when the mod's copy changes), and NGX searches that.
+	private static string NgxSearchFolder(string modFolder)
+	{
+		if (!OperatingSystem.IsLinux() || IsAscii(modFolder))
+		{
+			return modFolder;
+		}
+		const string RuntimePattern = "libnvidia-ngx-dlss.so.*";
+		string folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.DoNotVerify), "newaa", "dlss-runtime");
+		if (!IsAscii(folder))
+		{
+			Log("The mod folder and " + folder + " both have non-ASCII characters in their paths, which NGX cannot open on Linux. DLAA will be unavailable.");
+			return modFolder;
+		}
+		try
+		{
+			DirectoryInfo existing = new DirectoryInfo(folder);
+			if (existing.LinkTarget != null)
+			{
+				existing.Delete(); // a link would make the copies below land in whatever it points to
+			}
+			Directory.CreateDirectory(folder);
+			string[] runtimes = Directory.GetFiles(modFolder, RuntimePattern);
+			foreach (string old in Directory.GetFiles(folder, RuntimePattern))
+			{
+				if (!Array.Exists(runtimes, runtime => Path.GetFileName(runtime) == Path.GetFileName(old)))
+				{
+					File.Delete(old);
+				}
+			}
+			foreach (string runtime in runtimes)
+			{
+				FileInfo source = new FileInfo(runtime);
+				FileInfo copy = new FileInfo(Path.Combine(folder, source.Name));
+				if (!copy.Exists || copy.Length != source.Length || copy.LastWriteTimeUtc != source.LastWriteTimeUtc)
+				{
+					File.Copy(source.FullName, copy.FullName, true);
+					File.SetLastWriteTimeUtc(copy.FullName, source.LastWriteTimeUtc);
+					Log("The mod folder's path has non-ASCII characters, which NGX cannot open on Linux. Copied " + source.Name + " to " + folder + " for NGX.");
+				}
+			}
+			return folder;
+		}
+		catch (Exception ex)
+		{
+			Log("Could not copy the DLSS runtime to " + folder + " (" + ex.Message + "). NGX cannot open the mod folder's non-ASCII path, so DLAA may be unavailable.");
+			return modFolder;
+		}
+	}
+
+	private static bool IsAscii(string text)
+	{
+		foreach (char c in text)
+		{
+			if (c > 0x7F)
+			{
+				return false;
+			}
+		}
+		return true;
 	}
 
 	// The engine's vkGetInstanceProcAddr, so NGX uses the same Vulkan loader as the device.

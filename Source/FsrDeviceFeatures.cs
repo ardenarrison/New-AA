@@ -87,6 +87,11 @@ internal static unsafe class FsrDeviceFeatures
 
 	public static void Apply()
 	{
+		if (!FsrAntiAliasing.RuntimeExistsForThisSystem)
+		{
+			// No FSR on this system, so the game's device stays exactly as the game creates it.
+			return;
+		}
 		try
 		{
 			MethodBase? target = AccessTools.Method(typeof(Core.PhysicalDeviceExtensions), nameof(Core.PhysicalDeviceExtensions.CreateDevice),

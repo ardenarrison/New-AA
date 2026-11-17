@@ -5,7 +5,7 @@ Each runs after the game's tonemap composite, in place of its CMAA2 pass when se
 
 ## Install (Windows)
 
-Download `newaa-1.1.0.zip` from the Releases page. It contains the built mod, so nothing needs to be compiled. New AA supports Windows only for now.
+Download `newaa-1.2.0.zip` from the Releases page. It contains the built mod, so nothing needs to be compiled.
 
 1. Close the game and StarMap.
 2. Extract the `newaa` folder from the zip into `Documents\My Games\Kitten Space Agency\mods\`, so that `mods\newaa\mod.toml` exists.
@@ -20,12 +20,31 @@ Download `newaa-1.1.0.zip` from the Releases page. It contains the built mod, so
 DLAA needs an NVIDIA RTX GPU (RTX 20-series or newer) and a current driver. FSR Native AA works on NVIDIA, AMD and Intel GPUs that AMD's
 FSR runtime supports. TAA, SMAA and FXAA work on any GPU.
 
+## Install (Linux, experimental)
+
+For the game's native Linux build. If you play the Windows build of the game through Proton or Wine, use the Windows zip instead.
+Download `newaa-1.2.0-linux-x64-experimental.zip` from the Releases page. It has not been tested in the game on Linux yet, so please
+report what you find.
+
+1. Close the game.
+2. Extract the `newaa` folder from the zip into `~/Documents/My Games/Kitten Space Agency/mods/`, so that `mods/newaa/mod.toml` exists.
+   (The game uses your Documents folder as XDG names it, which can be translated, such as `~/Dokumente`.)
+3. Make sure `~/Documents/My Games/Kitten Space Agency/manifest.toml` contains the same `[[mods]]` entry as on Windows.
+4. Start the game through StarMap (Borea runs it with `dotnet StarMap.dll` on Linux), then pick **DLAA**, **TAA**, **SMAA** or **FXAA**
+   under Settings > Display > Anti-Aliasing.
+
+TAA, SMAA and FXAA work on any GPU. DLAA needs an NVIDIA RTX GPU and NVIDIA's own driver, which provides NGX (`libnvidia-ngx.so.1`) and
+`nvidia-smi`. FSR Native AA is not offered on Linux, because AMD ships its FSR runtime for Windows only.
+
+If something does not work, please open an issue with your distribution, GPU, driver version and the newest game log from
+`~/Documents/My Games/Kitten Space Agency/logs/` (for DLAA also `~/Documents/My Games/Kitten Space Agency/NewAA/ngx/ngx_log.txt`).
+
 ### Powered by NVIDIA DLSS
 DLAA in New AA uses **NVIDIA DLSS** (via the NVIDIA NGX SDK). NVIDIA, DLSS and RTX are trademarks of NVIDIA Corporation. New AA is a free community mod and is not affiliated with or endorsed by NVIDIA or by the game's developers.
-The release zip includes `nvngx_dlss.dll` and NVIDIA's NGX code in `NewAANgx.dll`, with NVIDIA's license text (`NVIDIA_DLSS_SDK_LICENSE.txt`). By using those files you agree to NVIDIA's license. In short: do not reverse engineer them or remove their notices, do not redistribute them as a stand-alone product, and DLSS is for systems with NVIDIA GPUs only.
+The release zips include NVIDIA's DLSS runtime (`nvngx_dlss.dll` on Windows, `libnvidia-ngx-dlss.so.310.9.1` on Linux) and NVIDIA's NGX code in `NewAANgx.dll` / `libNewAANgx.so`, with NVIDIA's license text (`NVIDIA_DLSS_SDK_LICENSE.txt`). By using those files you agree to NVIDIA's license. In short: do not reverse engineer them or remove their notices, do not redistribute them as a stand-alone product, and DLSS is for systems with NVIDIA GPUs only.
 
 ### Powered by AMD FSR
-FSR Native AA in New AA uses **AMD FSR** upscaling at a 1.0x ratio (from AMD's FSR SDK 2.4.0). The release zip includes AMD's signed
+FSR Native AA in New AA uses **AMD FSR** upscaling at a 1.0x ratio (from AMD's FSR SDK 2.4.0). The Windows release zip includes AMD's signed
 `amd_fidelityfx_loader_vk.dll` and `amd_fidelityfx_upscaler_vk.dll`, unmodified, with their MIT license text (`AMD_FSR_SDK_LICENSE.txt`).
 AMD, FidelityFX, FSR and Radeon are trademarks of Advanced Micro Devices, Inc. New AA is not affiliated with or endorsed by AMD.
 
@@ -38,13 +57,15 @@ AMD, FidelityFX, FSR and Radeon are trademarks of Advanced Micro Devices, Inc. N
 Then start the game through StarMap. Details, options and requirements are in `BUILD.md`. DLAA needs an NVIDIA RTX GPU (20-series or newer),
 and building it needs NVIDIA's DLSS SDK, which you download yourself (see `BUILD.md`). FSR, TAA, SMAA and FXAA do not need it. AMD's FSR
 runtime is downloaded by `setup.py` / `build.py` from AMD's repository at a fixed release and checked against pinned SHA-256 hashes.
-Third-party code and licenses are listed in `THIRD_PARTY_NOTICES.md`.
+`python build.py --linux` also assembles `Package-linux\`, the experimental Linux build, cross-compiling its native plugin with LLVM
+(see `BUILD.md`). Third-party code and licenses are listed in `THIRD_PARTY_NOTICES.md`.
 
 ## Layout
 
     mod.toml, NewAA.csproj, setup.py, build.py, deploy.py, newaa_common.py
     Content/            NewAAAssets.xml, Shaders/ (FXAA, SMAA, DLAA and TAA shaders), Textures/ (SMAA lookup tables, KTX2)
-    Native/             C++ plugin for NVIDIA NGX (newaa_ngx.cpp, built into NewAANgx.dll)
+    Native/             C++ plugin for NVIDIA NGX (newaa_ngx.cpp, built into NewAANgx.dll and, for Linux, libNewAANgx.so),
+                        make_linux_sysroot.sh (the Linux sysroot the Linux plugin is built against)
     ThirdParty/         AMD_FSR_SDK_LICENSE.txt (shipped with the FSR runtime)
     FSR_SDK/ (downloaded) AMD's signed FSR runtime DLLs
     Source/
@@ -66,6 +87,7 @@ Third-party code and licenses are listed in `THIRD_PARTY_NOTICES.md`.
       FsrDeviceFeatures.cs  Vulkan features and extensions FSR needs, added at device creation
 
     Package/ (generated)   the finished mod folder that deploy.py installs
+    Package-linux/ (generated)   the same for Linux (build.py --linux)
 
 ## How it hooks in
 
@@ -83,8 +105,12 @@ the original code runs. The prepare and final prefixes make the same decision, s
 
 - Selecting DLAA runs a GPU check once per session with `nvidia-smi`. Compatible means an RTX GPU with compute capability 7.5 or newer.
   Incompatible GPUs log `GPU incompatible with DLAA using no anti aliasing`.
-- If the GPU is compatible, the mod loads `NewAANgx.dll` from the mod folder and starts NVIDIA NGX. Every failure logs a `[DLAA]` line and
-  falls back to no anti-aliasing.
+- If the GPU is compatible, the mod loads `NewAANgx.dll` (Windows) or `libNewAANgx.so` (Linux) from the mod folder and starts NVIDIA
+  NGX. Every failure logs a `[DLAA]` line and falls back to no anti-aliasing. NGX writes its messages to `NewAA/ngx/ngx_log.txt` in the
+  game's profile folder (`Constants.DocumentsFolderPath`, which StarMap moves into the instance folder when Borea starts the game).
+- Linux: NGX turns its paths into file names in the "C" locale and resolves symbolic links first, so it cannot open a mod folder whose
+  path has a non-ASCII character (a translated Documents folder such as `~/Документы`). For such a folder the mod copies the DLSS runtime
+  to `~/.local/share/newaa/dlss-runtime/` (again only when the mod's copy changes) and points NGX there.
 - Pipeline: tonemap composite -> camera motion vectors (`DlaaMotionFrag.frag`) -> DLAA (NGX, in `NewAANgx.dll`) -> copy to the final target.
 - The camera is jittered for DLAA the same way as TAA. The jitter is passed to NGX in render pixels.
 - Motion vectors (`DlaaMotionFrag.frag`) cover the camera: its rotation from the view-projection matrices, and its movement relative to the followed object from `TaaCamera.CameraTranslation`. The game keeps positions relative to the camera, so the matrices alone miss orbiting and zooming.
@@ -93,7 +119,8 @@ the original code runs. The prepare and final prefixes make the same decision, s
 - Camera jumps (`TaaCamera.ResetFrameNumber`): changing the followed object or switching camera mode always makes DLSS start its history over and clears the per-object history. A very fast turn or moving more than half the distance to the followed object in one frame does the same, at most once every 30 frames. Each jump is logged with its reason.
 - Jitter lives in the camera only while the game records GPU work (`JitterWindow`: from `Program.UpdateShaderData` to the end of `Program.Render`). Both the view-projection and the projection are jittered, because the atmosphere, cloud, ring and sky shaders rebuild their view rays from the inverse projection and must be jittered like the geometry. Everything before that (orbit markers and labels via `Camera.EgoToScreen`, hover tests, culling) sees the unjittered camera.
 - DLAA runs on the main viewport only. The plugin holds one DLSS feature, and a second viewport (the game has a 128 x 128 one) made it rebuild the feature every frame.
-- Native files are in `Native\`. See `Native\BUILD.md` for building `NewAANgx.dll`. The build copies it into the mod folder if it is in `Native\`.
+- Native files are in `Native\`. See `Native\BUILD.md` for building `NewAANgx.dll` and `libNewAANgx.so`. The build copies them into the
+  packages if they are in `Native\`.
 - Adapter lines to check if the build fails: `renderer.Instance`, `renderer.PhysicalDevice`, `renderer.Device.Handle` in `DlaaRenderer.cs`, and
   `commandBuffer.Handle` in `DlaaRenderer.RenderPreparePasses`.
 - NGX is started with New AA's own project ID (a GUID, `ProjectId` in `DlaaRenderer.cs`) and the CUSTOM engine type, because NVIDIA issued no application ID. If NVIDIA ever issues one, switch `newaa_ngx.cpp` back to `NVSDK_NGX_VULKAN_Init`.
@@ -103,6 +130,9 @@ the original code runs. The prepare and final prefixes make the same decision, s
 FSR Native AA is AMD's FSR upscaler with render size equal to output size, so it only anti-aliases. It runs through the DLAA pipeline
 above: the same jittered camera, camera and per-object motion vectors, camera-jump resets, orbit-line overlay and main-viewport-only rule.
 Only the resolve step differs: `DlaaRenderer.EvaluateFsr` calls FSR where DLAA calls NGX.
+
+- Windows only: AMD ships the FSR runtime for Windows only, so on other systems FSR Native AA is left out of the dropdown and
+  `FsrDeviceFeatures` leaves the game's device as it is.
 
 - No native plugin: `FsrNative.cs` calls AMD's C API (`ffxCreateContext`, `ffxQuery`, `ffxDispatch`, `ffxDestroyContext`) in
   `amd_fidelityfx_loader_vk.dll` directly through function pointers. The loader finds `amd_fidelityfx_upscaler_vk.dll` in its own folder
@@ -153,7 +183,7 @@ FXAA (public domain), NVIDIA's DLSS SDK (not included; NVIDIA's license) and AMD
 
 ## Notes
 
-- The settings file stores the new options as numbers (5 for FXAA, 6 for SMAA, 8 for DLAA, 9 for FSR Native AA), because the game's enum
+- The settings file stores the new options as numbers (5 for FXAA, 6 for SMAA, 7 for TAA, 8 for DLAA, 9 for FSR Native AA), because the game's enum
   has no names for them.
 - Switching between an MSAA option and FXAA or SMAA asks for a restart, because MSAA changes the render
   targets at startup.
